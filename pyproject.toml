@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leadorbyt"
+version = "0.1.0"
+description = "MCP tool that finds businesses of a given niche/location and pulls their contact info into a CSV."
+requires-python = ">=3.11"
+dependencies = [
+    "scrapling[all]",
+    "mcp",
+    "uvicorn",
+]
+
+[project.scripts]
+leadorbyt = "leadorbyt.server:main"
+leadorbyt-admin = "leadorbyt.admin:main"
+
+[tool.setuptools.packages.find]
+include = ["leadorbyt*"]
