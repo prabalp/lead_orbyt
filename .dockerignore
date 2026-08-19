@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+leads_output/
+.scrapling_cache/
+*.egg-info/
+.DS_Store
+leadorbyt.db
+leadorbyt.db-shm
+leadorbyt.db-wal
+.git/

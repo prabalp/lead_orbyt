@@ -1,0 +1,15 @@
+services:
+  leadorbyt:
+    build: .
+    image: leadorbyt:latest
+    container_name: leadorbyt
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - leadorbyt_data:/data
+    environment:
+      - LEADORBYT_LOG_LEVEL=INFO
+
+volumes:
+  leadorbyt_data:
