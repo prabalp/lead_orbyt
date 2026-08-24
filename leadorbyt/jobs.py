@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from . import config, discovery, store
 from .enrich import enrich_website
 from .merge import export_csv, merge_records, _normalize
+from .sources import enrich_extras
 
 logger = logging.getLogger("leadorbyt.jobs")
 
@@ -69,6 +70,42 @@ async def _enrich_all(websites: list[str]) -> dict[str, dict]:
     return results
 
 
+async def _enrich_extras_all(discovery_items: list[dict], location: str) -> dict[str, dict]:
+    """Query the third-party sources (sources/registry.py) for each discovered business.
+
+    Not routed through the persistent store.py cache like _enrich_all --
+    these are supplementary, lower-volume lookups (firmographics, tech
+    stack, jobs, news, ...) rather than the core scrape, so re-fetching them
+    on every search keeps the code simple and the data fresh.
+    """
+    sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
+    results: dict[str, dict] = {}
+
+    # Dedup by domain before spawning tasks (not inside them) so two
+    # concurrent tasks for the same domain can't race past an "already have
+    # this key" check that neither has written yet.
+    by_key = {}
+    for item in discovery_items:
+        key = _normalize(item.get("website", ""))
+        if key and key not in by_key:
+            by_key[key] = item
+
+    async def _one(key: str, item: dict):
+        async with sem:
+            logger.info(f"Fetching extra data sources for {item.get('business_name', key)!r}")
+            results[key] = await enrich_extras(
+                business_name=item.get("business_name", ""),
+                website=item.get("website", ""),
+                domain=key,
+                location=location,
+                lat=item.get("lat"),
+                lon=item.get("lon"),
+            )
+
+    await asyncio.gather(*(_one(key, item) for key, item in by_key.items()))
+    return results
+
+
 async def _run_search(job: SearchJob) -> None:
     job.status = "running"
     await asyncio.to_thread(store.start_job, job.id)
@@ -78,8 +115,9 @@ async def _run_search(job: SearchJob) -> None:
 
     websites = [item.get("website", "") for item in discovery_items]
     enrichment_by_url = await _enrich_all(websites)
+    extras_by_url = await _enrich_extras_all(discovery_items, job.location)
 
-    merged = merge_records(discovery_items, enrichment_by_url)
+    merged = merge_records(discovery_items, enrichment_by_url, extras_by_url)
 
     user_output_dir = config.OUTPUT_DIR / job.user_id
     user_output_dir.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,9 @@ dependencies = [
     "scrapling[all]",
     "mcp",
     "uvicorn",
+    "httpx",
+    "python-dotenv",
+    "pyjwt[crypto]",
 ]
 
 [project.scripts]

@@ -8,3 +8,4 @@ leads_output/
 leadorbyt.db
 leadorbyt.db-shm
 leadorbyt.db-wal
+.env

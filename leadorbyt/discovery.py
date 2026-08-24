@@ -37,6 +37,7 @@ Why Google Maps over Yelp:
 
 import asyncio
 import logging
+import re
 from urllib.parse import quote
 
 from scrapling.spiders import Response
@@ -47,6 +48,17 @@ logger = logging.getLogger("leadorbyt.discovery")
 
 FEED_SELECTOR = 'div[role="feed"]'
 RESULT_LINK_SELECTOR = "a.hfpxzc"
+
+# Google Maps place URLs embed the pin's coordinates as "@<lat>,<lon>,<zoom>z"
+# in the path -- cheap to pull out of the URL we already have, no extra request.
+_COORDS_RE = re.compile(r"@(-?\d+\.\d+),(-?\d+\.\d+)")
+
+
+def _extract_coords(place_url: str) -> tuple[float | None, float | None]:
+    match = _COORDS_RE.search(place_url)
+    if not match:
+        return None, None
+    return float(match.group(1)), float(match.group(2))
 
 
 def _looks_blocked(response: Response | None) -> bool:
@@ -75,7 +87,7 @@ async def _scroll_feed(page, max_results: int, max_scrolls: int = 20) -> None:
         await asyncio.sleep(1.5)
 
 
-def _parse_place_page(response: Response) -> dict | None:
+def _parse_place_page(response: Response, place_url: str = "") -> dict | None:
     """Extract business details from a rendered Google Maps place page."""
     name = response.css("h1::text").get("").strip()
     if not name:
@@ -94,6 +106,7 @@ def _parse_place_page(response: Response) -> dict | None:
         address = address_label.split(":", 1)[-1].strip()
 
     category = response.css('button[jsaction*="category"]::text').get("").strip()
+    lat, lon = _extract_coords(place_url or response.url)
 
     return {
         "business_name": name,
@@ -101,6 +114,8 @@ def _parse_place_page(response: Response) -> dict | None:
         "website": website,
         "phone": phone,
         "address": address,
+        "lat": lat,
+        "lon": lon,
     }
 
 
@@ -151,7 +166,7 @@ async def discover(niche: str, location: str, max_results: int = 20) -> list[dic
                 logger.warning(f"Could not fetch place page: {place_url}")
                 continue
 
-            item = _parse_place_page(place_response)
+            item = _parse_place_page(place_response, place_url)
             if item is None:
                 logger.warning(f"Could not parse place page: {place_url}")
                 continue

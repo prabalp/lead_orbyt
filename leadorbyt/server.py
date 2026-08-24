@@ -26,6 +26,7 @@ from mcp.server.mcpserver import MCPServer
 from . import auth, config, jobs, store
 from .enrich import enrich_website
 from .merge import _normalize
+from .sources import enrich_extras
 
 logging.basicConfig(level=config.LOG_LEVEL, format="[%(asctime)s] %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("leadorbyt")
@@ -126,6 +127,27 @@ async def enrich_url(url: str) -> dict:
     data = await enrich_website(url)
     await asyncio.to_thread(store.put_enrichment, key, data)
     return data
+
+
+@server.tool()
+async def enrich_company_extras(business_name: str, website: str = "", location: str = "") -> dict:
+    """Pull additional data on one business from every configured third-party source.
+
+    Queries whichever of OpenStreetMap, Google Places, Yelp, Foursquare, SEC
+    EDGAR, OpenCorporates, Crunchbase, Clearbit, BuiltWith, Wappalyzer,
+    Greenhouse/Lever/Ashby/The Muse job boards, NewsAPI, Hunter, Apollo,
+    Snov, RocketReach, People Data Labs, Lusha, Cognism, ZoomInfo,
+    Findymail, LeadMagic, Wiza, and Prospeo have an API key configured (see
+    `.env.example`) -- sources without a configured key are silently
+    skipped, never called. Not cached; each call re-fetches live.
+
+    :param business_name: The business's display name.
+    :param website: Its website URL, if known (enables domain-keyed sources).
+    :param location: Free-text location (city/state), for local-search sources.
+    :return: dict with a namespaced key per field found, plus `sources_used`.
+    """
+    logger.info(f"Fetching extra data sources for {business_name!r}")
+    return await enrich_extras(business_name=business_name, website=website, location=location)
 
 
 def main() -> None:

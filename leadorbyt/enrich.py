@@ -18,6 +18,7 @@ from scrapling.fetchers import Fetcher
 
 from . import backoff, browser_pool, config
 from .extractors import extract_emails, extract_phones, extract_socials, find_contact_page_links
+from .sources import storefront
 
 BLOCKED_STATUS_CODES = {401, 403, 407, 429, 444, 500, 502, 503, 504}
 
@@ -76,11 +77,16 @@ async def enrich_website(url: str, follow_contact_pages: bool = True) -> dict:
         "twitter": "",
         "youtube": "",
         "tiktok": "",
+        "storefront_platforms": [],
     }
 
     home = await _fetch(url)
     if home is None:
         return result
+
+    storefront_result = storefront.detect((home.body or b"").decode("utf-8", errors="ignore"))
+    if storefront_result:
+        result.update(storefront_result)
 
     pages = [home]
     if follow_contact_pages:
