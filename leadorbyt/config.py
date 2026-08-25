@@ -45,6 +45,21 @@ CACHE_TTL_DAYS = float(os.environ.get("LEADORBYT_CACHE_TTL_DAYS", "7"))
 # --- Output ---
 OUTPUT_DIR = Path(os.environ.get("LEADORBYT_OUTPUT_DIR", str(Path.cwd() / "leads_output")))
 
+# --- Pre-enrichment qualification gate (see qualify.py) ---
+# Almost every paid source in sources/registry.py is keyed on domain (Apollo,
+# Hunter, Clearbit, ...), so a business with no website wastes a paid call on
+# every one of them. On by default; set to "false" to fan out regardless.
+REQUIRE_WEBSITE_FOR_EXTRAS = os.environ.get("LEADORBYT_REQUIRE_WEBSITE_FOR_EXTRAS", "true").lower() != "false"
+# Comma-separated, case-insensitive substrings matched against the discovered
+# Google Maps `category` field; a match skips the paid fan-out entirely (e.g.
+# "cemetery,parking lot" for a niche where those categories never convert).
+# Blank (default) filters nothing.
+EXCLUDE_CATEGORIES = {
+    c.strip().lower()
+    for c in os.environ.get("LEADORBYT_EXCLUDE_CATEGORIES", "").split(",")
+    if c.strip()
+}
+
 # --- HTTP transport (multi-tenant server) ---
 HOST = os.environ.get("LEADORBYT_HOST", "0.0.0.0")
 PORT = int(os.environ.get("LEADORBYT_PORT", "8000"))

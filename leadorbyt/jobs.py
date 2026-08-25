@@ -21,7 +21,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from . import config, discovery, store
+from . import config, discovery, qualify, store
 from .enrich import enrich_website
 from .merge import export_csv, merge_records, _normalize
 from .sources import enrich_extras
@@ -73,10 +73,11 @@ async def _enrich_all(websites: list[str]) -> dict[str, dict]:
 async def _enrich_extras_all(discovery_items: list[dict], location: str) -> dict[str, dict]:
     """Query the third-party sources (sources/registry.py) for each discovered business.
 
-    Not routed through the persistent store.py cache like _enrich_all --
-    these are supplementary, lower-volume lookups (firmographics, tech
-    stack, jobs, news, ...) rather than the core scrape, so re-fetching them
-    on every search keeps the code simple and the data fresh.
+    Gated by `qualify.should_enrich_extras` (skips businesses that were never
+    going to be worth ~20 paid lookups -- no website, an excluded category)
+    and, for the ones that pass, cached by domain in store.py's
+    `extras_cache` table so the same business surfacing across two searches
+    doesn't re-bill every provider.
     """
     sem = asyncio.Semaphore(config.MAX_CONCURRENCY)
     results: dict[str, dict] = {}
@@ -85,15 +86,26 @@ async def _enrich_extras_all(discovery_items: list[dict], location: str) -> dict
     # concurrent tasks for the same domain can't race past an "already have
     # this key" check that neither has written yet.
     by_key = {}
+    skipped = 0
     for item in discovery_items:
+        if not qualify.should_enrich_extras(item):
+            skipped += 1
+            continue
         key = _normalize(item.get("website", ""))
         if key and key not in by_key:
             by_key[key] = item
+    if skipped:
+        logger.info(f"Qualify gate skipped {skipped} of {len(discovery_items)} discovered businesses")
 
     async def _one(key: str, item: dict):
+        cached = await asyncio.to_thread(store.get_extras, key)
+        if cached is not None:
+            logger.info(f"Cache hit for extras of {item.get('business_name', key)!r}")
+            results[key] = cached
+            return
         async with sem:
             logger.info(f"Fetching extra data sources for {item.get('business_name', key)!r}")
-            results[key] = await enrich_extras(
+            data = await enrich_extras(
                 business_name=item.get("business_name", ""),
                 website=item.get("website", ""),
                 domain=key,
@@ -101,6 +113,8 @@ async def _enrich_extras_all(discovery_items: list[dict], location: str) -> dict
                 lat=item.get("lat"),
                 lon=item.get("lon"),
             )
+            await asyncio.to_thread(store.put_extras, key, data)
+            results[key] = data
 
     await asyncio.gather(*(_one(key, item) for key, item in by_key.items()))
     return results

@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS enrichment_cache (
     fetched_at REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS extras_cache (
+    domain TEXT PRIMARY KEY,
+    data_json TEXT NOT NULL,
+    fetched_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS domain_backoff (
     domain TEXT PRIMARY KEY,
     next_allowed_at REAL NOT NULL,
@@ -157,6 +163,38 @@ def put_enrichment(domain: str, data: dict) -> None:
     with _cursor() as cur:
         cur.execute(
             "INSERT INTO enrichment_cache (domain, data_json, fetched_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(domain) DO UPDATE SET data_json = excluded.data_json, "
+            "fetched_at = excluded.fetched_at",
+            (domain, json.dumps(data), time.time()),
+        )
+
+
+# --- Extras cache (third-party source fan-out, keyed by domain) ------------
+
+def get_extras(domain: str) -> dict | None:
+    if not domain:
+        return None
+    ttl_seconds = config.CACHE_TTL_DAYS * 86400
+    cutoff = time.time() - ttl_seconds
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT data_json, fetched_at FROM extras_cache WHERE domain = ?",
+            (domain,),
+        ).fetchone()
+    if row is None:
+        return None
+    data_json, fetched_at = row
+    if fetched_at < cutoff:
+        return None
+    return json.loads(data_json)
+
+
+def put_extras(domain: str, data: dict) -> None:
+    if not domain:
+        return
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO extras_cache (domain, data_json, fetched_at) VALUES (?, ?, ?) "
             "ON CONFLICT(domain) DO UPDATE SET data_json = excluded.data_json, "
             "fetched_at = excluded.fetched_at",
             (domain, json.dumps(data), time.time()),
