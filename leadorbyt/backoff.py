@@ -16,6 +16,7 @@ import random
 from urllib.parse import urlparse
 
 from . import config, store
+from .errors import ErrorType, LeadOrbytError
 
 logger = logging.getLogger("leadorbyt.backoff")
 
@@ -37,24 +38,32 @@ async def _wait_for_domain(domain: str) -> None:
 async def fetch_with_backoff(url: str, fetch_fn, is_blocked_fn):
     """Call `await fetch_fn()` for `url`, retrying with shared per-domain backoff.
 
-    `fetch_fn` takes no args and returns a response object (or None on
-    exception). `is_blocked_fn(response)` decides whether the response looks
-    like a block (rate-limit, CAPTCHA, empty body, etc.) and should trigger a
-    backoff + retry rather than being treated as a real (if disappointing)
-    result.
+    `fetch_fn` takes no args and returns a response object. `is_blocked_fn(response)`
+    decides whether the response looks like a block (rate-limit, CAPTCHA, empty
+    body, etc.) and should trigger a backoff + retry rather than being treated
+    as a real (if disappointing) result.
+
+    Raises `LeadOrbytError(ErrorType.BLOCKED, ...)` if every retry looked
+    blocked, or `LeadOrbytError(ErrorType.TRANSPORT_ERROR, ...)` if every
+    retry raised an exception (network/timeout/render failure) -- these are
+    distinguishable failure modes callers can react to differently, rather
+    than both silently collapsing into the same "no result" signal.
     """
     domain = _domain_of(url)
     response = None
+    last_exception: Exception | None = None
 
     for attempt in range(MAX_RETRIES):
         await _wait_for_domain(domain)
 
         try:
             response = await fetch_fn()
-        except Exception:
+            last_exception = None
+        except Exception as exc:
             response = None
+            last_exception = exc
 
-        if not is_blocked_fn(response):
+        if response is not None and not is_blocked_fn(response):
             if domain:
                 await asyncio.to_thread(store.record_success, domain)
             return response
@@ -72,4 +81,15 @@ async def fetch_with_backoff(url: str, fetch_fn, is_blocked_fn):
                 f"backing off {delay:.1f}s"
             )
 
-    return response
+    if last_exception is not None:
+        raise LeadOrbytError(
+            ErrorType.TRANSPORT_ERROR,
+            f"failed to fetch {url} after {MAX_RETRIES} attempts: {last_exception}",
+            retryable=True,
+        ) from last_exception
+
+    raise LeadOrbytError(
+        ErrorType.BLOCKED,
+        f"{url} looked blocked on every attempt ({MAX_RETRIES}/{MAX_RETRIES})",
+        retryable=True,
+    )

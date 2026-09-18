@@ -23,6 +23,14 @@ from . import store
 
 current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
+# Signup UI and health checks are public; MCP tools stay behind a Bearer key.
+PUBLIC_PATHS = frozenset({"/", "/signup", "/verify-email", "/health"})
+
+
+def _is_public_path(path: str) -> bool:
+    normalized = "/" if path in ("", "/") else path.rstrip("/")
+    return normalized in PUBLIC_PATHS
+
 
 def generate_key() -> str:
     return secrets.token_urlsafe(32)
@@ -54,6 +62,11 @@ class ApiKeyAuthMiddleware:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path") or "/"
+        if _is_public_path(path):
             await self.app(scope, receive, send)
             return
 

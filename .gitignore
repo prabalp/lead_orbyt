@@ -9,3 +9,4 @@ leadorbyt.db
 leadorbyt.db-shm
 leadorbyt.db-wal
 .env
+docker-compose.override.yml

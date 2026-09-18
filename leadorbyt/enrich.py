@@ -17,6 +17,7 @@ import asyncio
 from scrapling.fetchers import Fetcher
 
 from . import backoff, browser_pool, config
+from .errors import LeadOrbytError
 from .extractors import extract_emails, extract_phones, extract_socials, find_contact_page_links
 from .sources import storefront
 
@@ -32,8 +33,14 @@ def _looks_blocked(response) -> bool:
     return len(body) < 200
 
 
-async def _fetch(url: str):
-    """Fetch a URL with the fast Fetcher, escalating to a pooled stealth session if blocked."""
+async def _fetch(url: str) -> tuple[object | None, str | None]:
+    """Fetch a URL with the fast Fetcher, escalating to a pooled stealth session if blocked.
+
+    Returns `(response, error_type)`: on success `error_type` is `None`; on
+    failure `response` is `None` and `error_type` names the `ErrorType` (as a
+    string) of whichever attempt failed last, for callers that want to record
+    *why* a site couldn't be enriched rather than just that it wasn't.
+    """
 
     async def _fast():
         return await asyncio.to_thread(
@@ -44,9 +51,15 @@ async def _fetch(url: str):
             stealthy_headers=True,
         )
 
-    response = await backoff.fetch_with_backoff(url, _fast, _looks_blocked)
+    try:
+        response = await backoff.fetch_with_backoff(url, _fast, _looks_blocked)
+    except LeadOrbytError as exc:
+        response = None
+        fast_error = exc.type.value
+    else:
+        fast_error = None
 
-    if _looks_blocked(response):
+    if response is None or _looks_blocked(response):
         async with browser_pool.checkout() as session:
 
             async def _stealth():
@@ -56,9 +69,13 @@ async def _fetch(url: str):
                     timeout=int(config.REQUEST_TIMEOUT * 1000),
                 )
 
-            response = await backoff.fetch_with_backoff(url, _stealth, _looks_blocked)
+            try:
+                response = await backoff.fetch_with_backoff(url, _stealth, _looks_blocked)
+            except LeadOrbytError as exc:
+                return None, exc.type.value
+            return response, None
 
-    return response
+    return response, fast_error
 
 
 async def enrich_website(url: str, follow_contact_pages: bool = True) -> dict:
@@ -80,8 +97,9 @@ async def enrich_website(url: str, follow_contact_pages: bool = True) -> dict:
         "storefront_platforms": [],
     }
 
-    home = await _fetch(url)
+    home, error_type = await _fetch(url)
     if home is None:
+        result["_error_type"] = error_type
         return result
 
     storefront_result = storefront.detect((home.body or b"").decode("utf-8", errors="ignore"))
@@ -91,7 +109,7 @@ async def enrich_website(url: str, follow_contact_pages: bool = True) -> dict:
     pages = [home]
     if follow_contact_pages:
         for link in find_contact_page_links(home, url)[:2]:
-            sub = await _fetch(link)
+            sub, _ = await _fetch(link)
             if sub is not None:
                 pages.append(sub)
 

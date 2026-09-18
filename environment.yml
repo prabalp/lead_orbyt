@@ -8,3 +8,11 @@ dependencies:
       - scrapling[all]==0.4.14
       - mcp==2.0.0
       - uvicorn
+      - httpx
+      - python-dotenv
+      - pyjwt[crypto]
+      - scikit-learn
+      - python-multipart
+      - pytest
+      - pytest-asyncio
+      - pytest-mock

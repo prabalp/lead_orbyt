@@ -10,6 +10,12 @@ services:
       - leadorbyt_data:/data
     environment:
       - LEADORBYT_LOG_LEVEL=INFO
+      - LEADORBYT_PUBLIC_URL=https://lead.orbyt.in
+      - RESEND_API_KEY=
+      - EMAIL_FROM_ADDRESS=Lead Orbyt <onboarding@resend.dev>
+    # RESEND_API_KEY is a secret and deliberately left blank here -- provide
+    # the real value via a git-ignored docker-compose.override.yml on the
+    # deployment host, not by editing this tracked file.
 
 volumes:
   leadorbyt_data:

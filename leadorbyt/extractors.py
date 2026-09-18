@@ -30,6 +30,8 @@ JUNK_EMAIL_PATTERNS = (
     ".webp",
     "noreply@",
     "no-reply@",
+    "@google.com",
+    "gstatic.com",
 )
 
 SOCIAL_DOMAINS = {
