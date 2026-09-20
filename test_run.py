@@ -7,13 +7,13 @@
 import asyncio
 
 from leadorbyt import auth
-from leadorbyt.server import find_leads
+from leadorbyt.server import find_leads_maps
 
 
 async def main():
     token = auth.current_user_id.set("manual-smoke")
     try:
-        result = await find_leads("coffee shops", "Austin, TX", 5)
+        result = await find_leads_maps("coffee shops", "Austin, TX", 5)
     finally:
         auth.current_user_id.reset(token)
     path = result["result_path"]

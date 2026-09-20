@@ -21,6 +21,10 @@ A blank API key means that source is **never called**. The Maps + website pipeli
 | `LEADORBYT_SIGNUP_PER_HOUR` | `8` | Signup attempts allowed per IP per hour |
 | `RESEND_API_KEY` | empty | Resend key for verification email (same name as Mail Orbyt). Blank logs the message instead of sending |
 | `EMAIL_FROM_ADDRESS` | `Lead Orbyt <onboarding@resend.dev>` | From address; must be on a Resend-verified domain in production |
+| `LEADORBYT_WEB_SIGNALS_ENABLED` | `true` | Enable `find_web_signals` (DuckDuckGo `site:` search). Independent of Maps. |
+| `LEADORBYT_WEB_SIGNAL_SITES` | `linkedin,reddit,x,facebook` | Default networks when a call omits `sites` |
+| `LEADORBYT_TOKEN_ENCRYPTION_KEY` | empty | Required to store Reddit/X OAuth tokens |
+| `X_OAUTH_CLIENT_ID` / `X_OAUTH_CLIENT_SECRET` | empty | Official X user login (redirect `{PUBLIC_URL}/connect/x/callback`) |
 
 Docker sets `LEADORBYT_DB_PATH=/data/leadorbyt.db` and `LEADORBYT_OUTPUT_DIR=/data/leads_output`. Compose publishes `127.0.0.1:8010:8000` and does **not** load `.env` unless you add `env_file`.
 

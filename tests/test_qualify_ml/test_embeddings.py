@@ -27,3 +27,17 @@ def test_profile_text_skips_blank_fields():
 
 def test_profile_text_empty_item():
     assert profile_text({}) == ""
+
+
+def test_profile_text_handles_reddit_signal_shape():
+    signal = {"subreddit": "smallbusiness", "post_title": "Looking for a CRM", "post_body": "Any recs?"}
+    assert profile_text(signal) == "smallbusiness | Looking for a CRM | Any recs?"
+
+
+def test_profile_text_reddit_fields_do_not_collide_with_business_or_person():
+    business = {"business_name": "Acme Coffee"}
+    person = {"full_name": "Jane Smith"}
+    signal = {"post_title": "Need help"}
+    assert profile_text(business) == "Acme Coffee"
+    assert profile_text(person) == "Jane Smith"
+    assert profile_text(signal) == "Need help"

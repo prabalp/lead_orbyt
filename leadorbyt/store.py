@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS discovery_search_cache (
     location TEXT NOT NULL,
     max_results INTEGER NOT NULL,
     result_path TEXT NOT NULL,
+    web_signals_path TEXT,
     finished_at REAL NOT NULL,
     PRIMARY KEY (user_id, niche, location, max_results)
 );
@@ -187,6 +188,64 @@ CREATE TABLE IF NOT EXISTS lead_states (
     updated_at REAL NOT NULL,
     PRIMARY KEY (user_id, icp_hash, dedup_key)
 );
+
+CREATE TABLE IF NOT EXISTS signal_leads (
+    user_id TEXT NOT NULL,
+    dedup_key TEXT NOT NULL,
+    reddit_username TEXT NOT NULL,
+    subreddit TEXT NOT NULL,
+    discovered_by_query TEXT NOT NULL,
+    first_seen_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    PRIMARY KEY (user_id, dedup_key)
+);
+
+CREATE TABLE IF NOT EXISTS signal_search_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    query TEXT NOT NULL,
+    subreddits TEXT NOT NULL,
+    icp TEXT,
+    max_results INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    started_at REAL,
+    finished_at REAL,
+    result_path TEXT,
+    error TEXT,
+    error_type TEXT,
+    stage TEXT,
+    signals_found INTEGER
+);
+
+CREATE TABLE IF NOT EXISTS oauth_tickets (
+    ticket_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    consumed_at REAL
+);
+
+CREATE TABLE IF NOT EXISTS oauth_states (
+    state_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    code_verifier_enc TEXT,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS connected_accounts (
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    access_token_enc TEXT NOT NULL,
+    refresh_token_enc TEXT,
+    expires_at REAL,
+    account_label TEXT,
+    connected_at REAL NOT NULL,
+    PRIMARY KEY (user_id, provider)
+);
 """
 
 # (table, column, sqlite type + default) additive migrations for existing
@@ -199,6 +258,7 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("search_jobs", "items_enriched", "INTEGER"),
     ("search_jobs", "items_total", "INTEGER"),
     ("users", "email_verified_at", "REAL"),
+    ("discovery_search_cache", "web_signals_path", "TEXT"),
 ]
 
 
@@ -443,17 +503,41 @@ def get_discovery_search(user_id: str, niche: str, location: str, max_results: i
     return result_path
 
 
+def get_discovery_web_signals(user_id: str, niche: str, location: str, max_results: int) -> str | None:
+    """Cached web/social SERP CSV written alongside a Maps discovery, if any."""
+    ttl_seconds = config.CACHE_TTL_DAYS * 86400
+    cutoff = time.time() - ttl_seconds
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT web_signals_path FROM discovery_search_cache "
+            "WHERE user_id = ? AND niche = ? AND location = ? AND max_results = ? AND finished_at >= ?",
+            (user_id, niche, location, max_results, cutoff),
+        ).fetchone()
+    if row is None or not row[0]:
+        return None
+    if not Path(row[0]).exists():
+        return None
+    return row[0]
+
+
 def put_discovery_search(
-    user_id: str, niche: str, location: str, max_results: int, result_path: str
+    user_id: str,
+    niche: str,
+    location: str,
+    max_results: int,
+    result_path: str,
+    web_signals_path: str = "",
 ) -> None:
     with _cursor() as cur:
         cur.execute(
             "INSERT INTO discovery_search_cache "
-            "(user_id, niche, location, max_results, result_path, finished_at) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
+            "(user_id, niche, location, max_results, result_path, web_signals_path, finished_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(user_id, niche, location, max_results) DO UPDATE SET "
-            "result_path = excluded.result_path, finished_at = excluded.finished_at",
-            (user_id, niche, location, max_results, result_path, time.time()),
+            "result_path = excluded.result_path, "
+            "web_signals_path = excluded.web_signals_path, "
+            "finished_at = excluded.finished_at",
+            (user_id, niche, location, max_results, result_path, web_signals_path or "", time.time()),
         )
 
 
@@ -773,6 +857,98 @@ def set_lead_state(user_id: str, icp_hash: str, dedup_key: str, state: str) -> N
         )
 
 
+# --- Signal leads (Reddit; cross-run dedup/provenance; per-user) ------------
+
+def upsert_signal_lead(
+    user_id: str,
+    dedup_key: str,
+    reddit_username: str,
+    subreddit: str,
+    discovered_by_query: str,
+) -> bool:
+    """Record a signal lead as seen; returns True if this is the first time we've seen it."""
+    now = time.time()
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT 1 FROM signal_leads WHERE user_id = ? AND dedup_key = ?",
+            (user_id, dedup_key),
+        ).fetchone()
+        is_new = row is None
+        cur.execute(
+            "INSERT INTO signal_leads (user_id, dedup_key, reddit_username, subreddit, "
+            "discovered_by_query, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, dedup_key) DO UPDATE SET last_seen_at = excluded.last_seen_at",
+            (user_id, dedup_key, reddit_username, subreddit, discovered_by_query, now, now),
+        )
+    return is_new
+
+
+# --- Signal search jobs (observability for the signal-lead queue; per-user) ---
+
+def create_signal_job(job_id: str, user_id: str, query: str, subreddits: str, icp: str, max_results: int) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO signal_search_jobs (id, user_id, query, subreddits, icp, max_results, "
+            "status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?)",
+            (job_id, user_id, query, subreddits, icp, max_results, time.time()),
+        )
+
+
+def start_signal_job(job_id: str) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE signal_search_jobs SET status = 'running', started_at = ? WHERE id = ?",
+            (time.time(), job_id),
+        )
+
+
+def finish_signal_job(job_id: str, result_path: str) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE signal_search_jobs SET status = 'done', finished_at = ?, result_path = ? WHERE id = ?",
+            (time.time(), result_path, job_id),
+        )
+
+
+def fail_signal_job(job_id: str, error: str, error_type: str | None = None) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE signal_search_jobs SET status = 'error', finished_at = ?, error = ?, error_type = ? WHERE id = ?",
+            (time.time(), error, error_type, job_id),
+        )
+
+
+def update_signal_job_progress(job_id: str, stage: str | None = None, signals_found: int | None = None) -> None:
+    fields, values = [], []
+    for column, value in (("stage", stage), ("signals_found", signals_found)):
+        if value is not None:
+            fields.append(f"{column} = ?")
+            values.append(value)
+    if not fields:
+        return
+    values.append(job_id)
+    with _cursor() as cur:
+        cur.execute(f"UPDATE signal_search_jobs SET {', '.join(fields)} WHERE id = ?", values)
+
+
+def get_signal_job(job_id: str, user_id: str) -> dict | None:
+    """Scoped by user_id so a guessed/leaked job id from another tenant can't be polled."""
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT id, query, subreddits, icp, max_results, status, result_path, "
+            "error, error_type, stage, signals_found "
+            "FROM signal_search_jobs WHERE id = ? AND user_id = ?",
+            (job_id, user_id),
+        ).fetchone()
+    if row is None:
+        return None
+    keys = (
+        "id", "query", "subreddits", "icp", "max_results", "status", "result_path",
+        "error", "error_type", "stage", "signals_found",
+    )
+    return dict(zip(keys, row))
+
+
 # --- Users / API keys ---------------------------------------------------------
 
 def get_user_by_email(email: str) -> dict | None:
@@ -909,3 +1085,110 @@ def list_users() -> list[dict]:
         rows = cur.execute("SELECT id, label, created_at, disabled_at FROM users ORDER BY created_at").fetchall()
     keys = ("id", "label", "created_at", "disabled_at")
     return [dict(zip(keys, row)) for row in rows]
+
+
+# --- Social OAuth tickets / connected accounts --------------------------------
+
+def create_oauth_ticket(user_id: str, provider: str, ticket_hash: str, expires_at: float) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO oauth_tickets (ticket_hash, user_id, provider, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (ticket_hash, user_id, provider, time.time(), expires_at),
+        )
+
+
+def consume_oauth_ticket(ticket_hash: str) -> dict | None:
+    now = time.time()
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT user_id, provider, expires_at, consumed_at FROM oauth_tickets WHERE ticket_hash = ?",
+            (ticket_hash,),
+        ).fetchone()
+        if row is None or row[3] is not None or row[2] <= now:
+            return None
+        cur.execute(
+            "UPDATE oauth_tickets SET consumed_at = ? WHERE ticket_hash = ?",
+            (now, ticket_hash),
+        )
+    return {"user_id": row[0], "provider": row[1]}
+
+
+def create_oauth_state(
+    state_hash: str, user_id: str, provider: str, code_verifier_enc: str, expires_at: float
+) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO oauth_states (state_hash, user_id, provider, code_verifier_enc, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (state_hash, user_id, provider, code_verifier_enc, time.time(), expires_at),
+        )
+
+
+def take_oauth_state(state_hash: str) -> dict | None:
+    now = time.time()
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT user_id, provider, code_verifier_enc, expires_at FROM oauth_states WHERE state_hash = ?",
+            (state_hash,),
+        ).fetchone()
+        if row is None or row[3] <= now:
+            return None
+        cur.execute("DELETE FROM oauth_states WHERE state_hash = ?", (state_hash,))
+    return {"user_id": row[0], "provider": row[1], "code_verifier_enc": row[2] or ""}
+
+
+def upsert_connected_account(
+    user_id: str,
+    provider: str,
+    access_token_enc: str,
+    refresh_token_enc: str,
+    expires_at: float | None,
+    account_label: str,
+) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "INSERT INTO connected_accounts "
+            "(user_id, provider, access_token_enc, refresh_token_enc, expires_at, account_label, connected_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, provider) DO UPDATE SET "
+            "access_token_enc = excluded.access_token_enc, "
+            "refresh_token_enc = excluded.refresh_token_enc, "
+            "expires_at = excluded.expires_at, "
+            "account_label = excluded.account_label, "
+            "connected_at = excluded.connected_at",
+            (user_id, provider, access_token_enc, refresh_token_enc, expires_at, account_label, time.time()),
+        )
+
+
+def get_connected_account(user_id: str, provider: str) -> dict | None:
+    with _cursor() as cur:
+        row = cur.execute(
+            "SELECT access_token_enc, refresh_token_enc, expires_at, account_label, connected_at "
+            "FROM connected_accounts WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        ).fetchone()
+    if row is None:
+        return None
+    keys = ("access_token_enc", "refresh_token_enc", "expires_at", "account_label", "connected_at")
+    return dict(zip(keys, row))
+
+
+def list_connected_accounts(user_id: str) -> list[dict]:
+    with _cursor() as cur:
+        rows = cur.execute(
+            "SELECT provider, account_label, connected_at, expires_at FROM connected_accounts WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    return [
+        {"provider": r[0], "account_label": r[1], "connected_at": r[2], "expires_at": r[3]}
+        for r in rows
+    ]
+
+
+def delete_connected_account(user_id: str, provider: str) -> None:
+    with _cursor() as cur:
+        cur.execute(
+            "DELETE FROM connected_accounts WHERE user_id = ? AND provider = ?",
+            (user_id, provider),
+        )

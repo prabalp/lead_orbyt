@@ -85,6 +85,20 @@ QUALIFY_GATE_MAX_STD = float(os.environ.get("LEADORBYT_QUALIFY_GATE_MAX_STD", "0
 QUERY_EXPANSION_MAX_ROUNDS = int(os.environ.get("LEADORBYT_QUERY_EXPANSION_MAX_ROUNDS", "2"))
 QUERY_EXPANSION_TOKENS_PER_ROUND = int(os.environ.get("LEADORBYT_QUERY_EXPANSION_TOKENS_PER_ROUND", "3"))
 
+# --- Web/social intent search (see web_signals.py / web_jobs.py) ---
+# find_web_signals runs a DuckDuckGo HTML search (scrapling Fetcher, stealth
+# if blocked) with site: filters for LinkedIn, Reddit, X, and Facebook.
+# Separate from find_leads_maps (Google Maps). Google's /search is not used:
+# that path is disallowed by robots.txt, which this project already obeys.
+WEB_SIGNALS_ENABLED = os.environ.get("LEADORBYT_WEB_SIGNALS_ENABLED", "true").lower() != "false"
+WEB_SIGNAL_SITES = {
+    s.strip().lower()
+    for s in os.environ.get(
+        "LEADORBYT_WEB_SIGNAL_SITES", "linkedin,reddit,x,facebook"
+    ).split(",")
+    if s.strip()
+}
+
 # --- Person-lead discovery spend guardrail (see people_jobs.py) ---
 # A hard server-side ceiling on find_people_leads'/submit_people_search's
 # max_paid_lookups, applied regardless of what a caller requests. Apollo's
@@ -93,6 +107,20 @@ QUERY_EXPANSION_TOKENS_PER_ROUND = int(os.environ.get("LEADORBYT_QUERY_EXPANSION
 # lookup hits) and the total call volume/latency an agent can trigger in
 # one request, defense-in-depth on top of the per-call cap the tool itself accepts.
 MAX_PAID_LOOKUPS_CEILING = int(os.environ.get("LEADORBYT_MAX_PAID_LOOKUPS_CEILING", "50"))
+
+# --- Reddit signal search (see sources/reddit.py) ---
+# COMPLIANCE NOTE: Reddit's API terms name "lead generation" as commercial
+# use requiring Reddit's paid/contracted API access -- this free-tier
+# integration is used outside that licensed scope; a deliberate, disclosed
+# choice, not an oversight. See sources/reddit.py's module docstring.
+REDDIT_CLIENT_ID = os.environ.get("REDDIT_CLIENT_ID", "")
+REDDIT_CLIENT_SECRET = os.environ.get("REDDIT_CLIENT_SECRET", "")
+# Reddit rejects generic/default user agents -- set something identifying,
+# e.g. "leadorbyt/0.1 by u/yourusername".
+REDDIT_USER_AGENT = os.environ.get("REDDIT_USER_AGENT", "")
+# Kept below Reddit's ~100 req/min free-tier ceiling to leave headroom for
+# clock/measurement drift, not because leadorbyt has its own quota.
+REDDIT_MAX_REQUESTS_PER_MINUTE = int(os.environ.get("LEADORBYT_REDDIT_MAX_RPM", "60"))
 
 # --- HTTP transport (multi-tenant server) ---
 HOST = os.environ.get("LEADORBYT_HOST", "0.0.0.0")
@@ -108,6 +136,13 @@ SIGNUP_PER_HOUR = int(os.environ.get("LEADORBYT_SIGNUP_PER_HOUR", "8"))
 # key blank to log the message instead of sending it (local dev).
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 EMAIL_FROM_ADDRESS = os.environ.get("EMAIL_FROM_ADDRESS", "Lead Orbyt <onboarding@resend.dev>")
+# Fernet-compatible key, or any long secret (SHA-256 derived). Required to
+# store Reddit/X OAuth tokens. Generate with:
+# python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+TOKEN_ENCRYPTION_KEY = os.environ.get("LEADORBYT_TOKEN_ENCRYPTION_KEY", "")
+# X OAuth 2.0 user login (official API). Separate from X_BEARER_TOKEN app lookup.
+X_OAUTH_CLIENT_ID = os.environ.get("X_OAUTH_CLIENT_ID", "")
+X_OAUTH_CLIENT_SECRET = os.environ.get("X_OAUTH_CLIENT_SECRET", "")
 
 # --- Logging ---
 LOG_LEVEL = os.environ.get("LEADORBYT_LOG_LEVEL", "INFO")

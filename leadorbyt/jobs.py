@@ -1,9 +1,9 @@
 """In-process job queue + worker pool for discovery searches.
 
-A `find_leads`/`submit_search` call used to run discovery + enrichment
+A `find_leads_maps`/`submit_search` call used to run discovery + enrichment
 inline, so every concurrent call raced to launch its own browser work with
 no shared cap. This module decouples "ask for a search" from "run a
-search": callers enqueue a job and either await its completion (`find_leads`)
+search": callers enqueue a job and either await its completion (`find_leads_maps`)
 or poll for it (`submit_search`/`get_search_status`), while a small, fixed
 pool of worker coroutines pulls from the queue and does the actual
 discovery -> research-list merge -> export pipeline. Website and third-party

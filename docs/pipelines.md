@@ -1,6 +1,6 @@
 # Pipelines
 
-## Business leads (`find_leads` / `submit_search`)
+## Business leads (`find_leads_maps` / `submit_search`)
 
 Discovery and enrichment are deliberately separate. A request for leads runs
 only `jobs._run_search`; enrichment requires a later, explicit
@@ -16,8 +16,7 @@ discovery_search_cache hit? (only if icp is empty)
 discover()  Google Maps search URL
         |   pooled AsyncStealthySession
         |   scroll feed, follow /maps/place/ links
-        |   parse every Maps-visible field: name, category, website, phone,
-        |   address, plus code, maps URL, coords, and any email/socials present
+        |   parse every Maps-visible field
         v
 merge_records() discovery fields only, dedupe
         |
@@ -54,6 +53,24 @@ Google Maps is a JS SPA. Discovery does **not** use Scrapling `CrawlSpider` anym
 
 These selectors were confirmed empirically and **will break if Google changes markup**. Coordinates are parsed from `@lat,lon` in the place URL (enables free OSM extras). Discovery keeps whatever Maps already published; website enrichment later only fills blanks.
 
+### Web/social intent posts (`find_web_signals` / `web_jobs.py`)
+
+Separate from Maps. Call this when the user wants public posts that already express the need (a LinkedIn “looking for a speaker in Austin”, a Reddit thread, an X post, a Facebook listing). If they also want Maps businesses, call `find_leads_maps` as a second tool — order follows what they asked for first.
+
+```
+query + location + max_results [+ icp] [+ sites]
+        |
+        v
+web_signals.discover()  DuckDuckGo HTML `site:` search
+        |   LinkedIn / Reddit / X / Facebook
+        |   scrapling Fetcher, stealth if blocked
+        |   optional official X recent-search if the user connected X
+        v
+export web-signal CSV  (not mixed into the Maps enrichment schema)
+```
+
+It uses scrapling against DuckDuckGo’s HTML SERP with `site:` filters — not Google `/search`, which robots.txt disallows. Disable with `LEADORBYT_WEB_SIGNALS_ENABLED=false`. Restrict default sites with `LEADORBYT_WEB_SIGNAL_SITES`; a call can pass a `sites` subset.
+
 ### Enrichment details (`enrich_lead_list` / `enrich.py`)
 
 Fast path is `Fetcher.get` (curl_cffi). Blocked-looking responses (4xx/5xx of interest, or body &lt; 200 bytes) escalate to the **same** stealth pool as discovery. Storefront detection runs on homepage HTML and is intentionally not part of the paid extras fan-out. Merge keeps Google Maps values and uses scrape/provider results only for empty fields.
@@ -64,7 +81,7 @@ using the tool as an arbitrary file reader.
 
 ### Cache behavior
 
-`find_leads` / `submit_search` return a cached **discovery-only** CSV when `(user_id, niche, location, max_results)` is still within `CACHE_TTL_DAYS` **and `icp` is empty**. It uses `discovery_search_cache`, separate from legacy enriched search cache rows.
+`find_leads_maps` / `submit_search` return a cached **discovery-only** CSV when `(user_id, niche, location, max_results)` is still within `CACHE_TTL_DAYS` **and `icp` is empty**. It uses `discovery_search_cache`, separate from legacy enriched search cache rows.
 
 `enrich_company_extras` (one-off MCP tool) is **not** cached; the pipeline extras path is.
 
@@ -132,4 +149,4 @@ Only when `goal_new_leads` is set. Tokens are words from job titles of previousl
 3. `submit_lead_verdicts` — writes `qualification_labels`.
 4. Later `find_people_leads(..., icp=...)` can `gate_accept` / `gate_reject`.
 
-There is **no** equivalent preview tool for business leads. `find_leads(..., icp=...)` still scores rows, but unlabeled businesses stay fail-open in the CSV until the same verdicts (keyed by user+ICP, not entity type) accumulate.
+There is **no** equivalent preview tool for business leads. `find_leads_maps(..., icp=...)` still scores rows, but unlabeled businesses stay fail-open in the CSV until the same verdicts (keyed by user+ICP, not entity type) accumulate.

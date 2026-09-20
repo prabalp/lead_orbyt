@@ -1,15 +1,18 @@
 # leadorbyt
 
-An MCP server that finds **businesses** (niche + location) or **named people** (job title + location) and writes contact CSVs. It does not send email.
+An MCP server that finds **businesses** (niche + location), **web/social intent posts**, or **named people** (job title + location) and writes contact CSVs. It does not send email.
 
 Architecture, pipelines, tool contracts, SQLite, and config live in **[docs/](docs/architecture.md)**. The rest of this README is how to run it.
 
-## Two pipelines
+## Independent discovery tools
 
-1. **Business leads** — `find_leads` creates a researched Google Maps list without enrichment. After review and explicit approval, `enrich_lead_list` visits websites and calls configured extras.
-2. **Person leads** — BetterContact or Apollo search → optional offline ICP gate → optional paid email reveal. Paid lookups default to zero.
+Call the source the user asked for first. If they want more than one, call the matching tools **one after another** — they are not bundled.
 
-Claude is instructed by the MCP tool contracts to show the initial list and ask before enrichment. A bare “find leads” request cannot trigger business enrichment or paid person lookups.
+1. **Google Maps businesses** — `find_leads_maps` researches a Maps list (name, category, website, phone, address, plus code, maps URL, coordinates, and any contact Maps already shows). After review and explicit approval, `enrich_lead_list` visits websites and calls configured extras.
+2. **Web/social intent** — `find_web_signals` finds public posts already asking for that thing (LinkedIn, Reddit, X, Facebook) via DuckDuckGo HTML `site:` search. Optional `sites` subset. Does not run as part of `find_leads_maps`.
+3. **Person leads** — `find_people_leads` (BetterContact or Apollo) → optional offline ICP gate → optional paid email reveal. Paid lookups default to zero.
+
+Claude is instructed by the MCP tool contracts to show each list and ask before enrichment or another source. A bare “find leads” request cannot trigger business enrichment, web search, or paid person lookups.
 
 Clients talk **streamable HTTP** with `Authorization: Bearer <api_key>`, not stdio. See [docs/mcp-tools.md](docs/mcp-tools.md).
 
@@ -32,7 +35,7 @@ Copy `.env.example` to `.env` next to wherever you run the server (same cwd as `
 
 ## Hosted signup
 
-The server serves a public page at `/`. A visitor enters an email, receives a verification link (Resend when `RESEND_API_KEY` is set; otherwise the link is logged), and after confirming gets:
+The server serves a public landing page at `/` that explains the Maps, web, and people tools, then a **Get MCP access** form. A visitor enters an email, receives a verification link (Resend when `RESEND_API_KEY` is set; otherwise the link is logged), and after confirming gets:
 
 - the MCP URL (`{LEADORBYT_PUBLIC_URL}/mcp`)
 - a one-time API key

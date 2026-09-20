@@ -65,3 +65,25 @@ def test_people_search_defaults_to_no_paid_enrichment():
 def test_csv_fields_include_coordinates_for_later_enrichment():
     assert "lat" in CSV_FIELDS
     assert "lon" in CSV_FIELDS
+
+
+async def test_run_search_does_not_call_web_signals(tmp_path, isolated_db, monkeypatch):
+    from leadorbyt import config, discovery, web_signals
+    from leadorbyt.jobs import SearchJob, _run_search
+
+    monkeypatch.setattr(config, "OUTPUT_DIR", tmp_path)
+
+    async def fake_maps(niche, location, max_results):
+        return [_discovery_row()]
+
+    async def boom(*args, **kwargs):
+        raise AssertionError("find_leads_maps must not run web search")
+
+    monkeypatch.setattr(discovery, "discover", fake_maps)
+    monkeypatch.setattr(web_signals, "discover", boom)
+
+    job = SearchJob(id="job-maps", user_id="user-1", niche="coffee shops", location="Austin, TX", max_results=5)
+    await _run_search(job)
+    assert job.result_path
+    with open(job.result_path, newline="", encoding="utf-8") as handle:
+        assert next(csv.DictReader(handle))["business_name"] == "Acme Coffee"

@@ -16,7 +16,7 @@ Caches are disposable (TTL). Recreating the file loses labels, lead identity, an
 
 | Table | Purpose |
 |---|---|
-| `discovery_search_cache` | Current discovery-only `(user_id, niche, location, max_results)` -> researched CSV path. |
+| `discovery_search_cache` | Current Maps-only `(user_id, niche, location, max_results)` -> CSV path. `web_signals_path` is a leftover column (unused after Maps/web split). |
 | `search_cache` | Legacy enriched-search cache retained for schema compatibility; the split workflow does not read it. |
 | `search_jobs` | Observability for pollers. Status/progress. Does **not** resume work after restart. |
 | `enrichment_cache` | domain -> website scrape JSON |
@@ -24,6 +24,13 @@ Caches are disposable (TTL). Recreating the file loses labels, lead identity, an
 | `leads` | Per-user business identity (`dedup_key`). Sets `is_new_lead` on upsert. |
 
 Business `dedup_key`: normalized domain, else `name:{name}|{address}`.
+
+## Web/social intent
+
+| Table | Purpose |
+|---|---|
+| `signal_search_jobs` | Pollers for `find_web_signals` and `find_reddit_signals`. In-memory queues do not resume after restart. |
+| `signal_leads` | Per-user post identity (`dedup_key` from URL). Sets `is_new_lead` on upsert. |
 
 ## Person pipeline
 

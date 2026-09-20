@@ -29,7 +29,9 @@ PUBLIC_PATHS = frozenset({"/", "/signup", "/verify-email", "/health"})
 
 def _is_public_path(path: str) -> bool:
     normalized = "/" if path in ("", "/") else path.rstrip("/")
-    return normalized in PUBLIC_PATHS
+    if normalized in PUBLIC_PATHS:
+        return True
+    return normalized == "/connect" or normalized.startswith("/connect/")
 
 
 def generate_key() -> str:

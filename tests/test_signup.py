@@ -171,8 +171,14 @@ def _client():
 def test_home_is_public():
     response = _client().get("/")
     assert response.status_code == 200
-    assert "Connect Lead Orbyt" in response.text
-    assert "Send verification link" in response.text
+    assert "Turn a conversation into a" in response.text
+    assert "Get MCP setup" in response.text
+    assert "Get MCP access" in response.text
+    assert 'id="setup"' in response.text
+    assert "find_leads_maps" in response.text
+    assert "find_web_signals" in response.text
+    assert "find_people_leads" in response.text
+    assert "does not send outreach" in response.text.lower()
 
 
 def test_mcp_still_requires_key():

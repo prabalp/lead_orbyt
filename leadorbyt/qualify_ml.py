@@ -61,10 +61,11 @@ def profile_text(item: dict) -> str:
     """Build the text blob embedded for the gate (and shown to the agent via
     `list_unlabeled_leads`).
 
-    Handles both discovery shapes leadorbyt produces -- a business (from
-    discovery.py) and a person (from apollo_people.py) -- by pulling
-    whichever fields are present; the two shapes don't overlap, so no
-    branching on entity type is needed.
+    Handles every discovery shape leadorbyt produces -- a business (from
+    discovery.py), a person (from apollo_people.py/bettercontact.py), and a
+    Reddit signal (from sources/reddit.py) -- by pulling whichever fields
+    are present; the shapes don't overlap, so no branching on entity type
+    is needed.
     """
     parts = [
         item.get("business_name", ""),
@@ -76,6 +77,11 @@ def profile_text(item: dict) -> str:
         item.get("full_name", ""),
         item.get("title", ""),
         item.get("company_name", ""),
+        item.get("subreddit", ""),
+        item.get("post_title", ""),
+        item.get("post_body", ""),
+        item.get("source", ""),
+        item.get("author", ""),
     ]
     return " | ".join(p for p in parts if p)
 
