@@ -738,10 +738,13 @@ def _page(
       gap: 72px;
       margin-bottom: 38px;
     }}
+    /* `color: inherit` because these are h2s: the base h2 rule below sets a
+       dark colour that vanishes on the dark workflow band. */
     .display-title {{
       font: 400 clamp(34px, 4vw, 54px)/1.08 var(--serif);
       letter-spacing: -.04em;
       margin: 0;
+      color: inherit;
     }}
     .section-heading > p, .workflow-copy > p, .setup-copy > p {{
       color: var(--on-variant);
