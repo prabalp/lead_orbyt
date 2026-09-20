@@ -2,7 +2,7 @@
 
 SQLite file: `LEADORBYT_DB_PATH` (default `./leadorbyt.db` in the process cwd). WAL mode. All public `store` functions are sync; callers use `asyncio.to_thread`.
 
-Caches are disposable (TTL). Recreating the file loses labels, lead identity, and API key hashes — tenants must be re-created with `leadorbyt-admin`.
+Caches are disposable (TTL). Recreating the file loses labels, lead identity, and API key hashes. Tenants must be re-created with `leadorbyt-admin`.
 
 ## Tenancy
 
@@ -56,6 +56,6 @@ Person `dedup_key` (first match): `apollo:{id}`, `bettercontact:{id}`, `linkedin
 ## Migrations
 
 - Fresh DB: `CREATE TABLE IF NOT EXISTS` in `_SCHEMA`.
-- Old single-tenant `search_cache` / jobs: dropped and recreated (`_migrate_to_multitenant`) — cache only.
+- Old single-tenant `search_cache` / jobs: dropped and recreated (`_migrate_to_multitenant`); cache only.
 - New columns on existing `search_jobs`: `_ADDITIVE_COLUMNS`.
 - New column on existing `users`: `email_verified_at`.

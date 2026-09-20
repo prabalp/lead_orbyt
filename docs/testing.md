@@ -48,8 +48,8 @@ Last local run while writing these docs: **174 passed**.
 2. `leadorbyt-admin create-user "dev"`
 3. `python -m leadorbyt.server`
 4. Point an MCP client at `http://127.0.0.1:8000/mcp` with the Bearer key
-5. `find_leads_maps("coffee shops", "Austin, TX", 5)` — expect a researched Maps CSV and `next_action` that does not imply web search already ran
-5b. `find_web_signals("speaking engagement", "Austin, TX", 5)` — expect a separate intent CSV; optional after Maps only if asked
-6. Repeat the same call — expect cache hit (seconds, not minutes) if `icp` is empty
-7. After approval, call `enrich_lead_list(result_path)` — expect a second `_enriched_*.csv`
-8. `find_people_leads` with no people-provider keys — expect an empty people CSV, not a crash
+5. `find_leads_maps("coffee shops", "Austin, TX", 5)`: expect a researched Maps CSV and `next_action` that does not imply web search already ran
+5b. `find_web_signals("speaking engagement", "Austin, TX", 5)`: expect a separate intent CSV; optional after Maps only if asked
+6. Repeat the same call: expect cache hit (seconds, not minutes) if `icp` is empty
+7. After approval, call `enrich_lead_list(result_path)`: expect a second `_enriched_*.csv`
+8. `find_people_leads` with no people-provider keys: expect an empty people CSV, not a crash

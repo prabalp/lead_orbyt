@@ -82,8 +82,8 @@ Third-party REST sources (`sources/base.py`) do **not** use the browser pool or 
 
 ### Qualification (two different gates)
 
-1. **`qualify.py`** — free rules before **paid business extras**. Skip if no website (default) or category matches `LEADORBYT_EXCLUDE_CATEGORIES`.
-2. **`qualify_ml.py`** — optional ICP scoring. No LLM, no API key. A Gaussian Process over HashingVectorizer embeddings learns from **agent-supplied verdicts** (`submit_lead_verdicts`). Until `LEADORBYT_QUALIFY_MIN_LABELS` (default 8) exist for `(user, icp)`, every lead is `qualified=True` / `source=agent_pending` (fail-open).
+1. **`qualify.py`:** free rules before **paid business extras**. Skip if no website (default) or category matches `LEADORBYT_EXCLUDE_CATEGORIES`.
+2. **`qualify_ml.py`:** optional ICP scoring. No LLM, no API key. A Gaussian Process over HashingVectorizer embeddings learns from **agent-supplied verdicts** (`submit_lead_verdicts`). Until `LEADORBYT_QUALIFY_MIN_LABELS` (default 8) exist for `(user, icp)`, every lead is `qualified=True` / `source=agent_pending` (fail-open).
 
 Person leads also keep a per-`(user, icp, dedup_key)` **state machine** in `lead_states` so a later search does not re-qualify or re-reveal someone already decided.
 
@@ -96,8 +96,8 @@ Person leads also keep a per-`(user, icp, dedup_key)` **state machine** in `lead
 
 ## Related docs
 
-- [pipelines.md](pipelines.md) — step-by-step for Maps, web/social, and people search
-- [mcp-tools.md](mcp-tools.md) — tool contracts
-- [data-model.md](data-model.md) — SQLite tables
-- [configuration.md](configuration.md) — env vars
-- [testing.md](testing.md) — what the test suite actually covers
+- [pipelines.md](pipelines.md): step-by-step for Maps, web/social, and people search
+- [mcp-tools.md](mcp-tools.md): tool contracts
+- [data-model.md](data-model.md): SQLite tables
+- [configuration.md](configuration.md): env vars
+- [testing.md](testing.md): what the test suite actually covers

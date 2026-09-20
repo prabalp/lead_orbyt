@@ -2,7 +2,7 @@
 
 Public by design. MCP tools stay behind Bearer auth. This module mints a
 tenant key the same way `leadorbyt-admin create-user` does, but only after
-the visitor confirms a Resend (or console-logged) verification link — the
+the visitor confirms a Resend (or console-logged) verification link. This is the
 Mail Orbyt pattern: GET renders a confirm button, POST consumes the token,
 so email-client prefetch cannot burn it. Returning emails reuse the tenant
 and mint a new key (the previous raw key cannot be retrieved).
@@ -221,7 +221,7 @@ def _page(
           </div>
           <div class="card-body stack">
             <p class="note">Click below to confirm <strong>{html.escape(verify_email)}</strong> and receive your API key.
-            Opening this page does not activate the link — email scanners cannot use it for you.</p>
+            Opening this page does not activate the link. Email scanners cannot use it for you.</p>
             {error_html}
             <form method="post" action="/verify-email" class="stack">
               <input type="hidden" name="token" value="{html.escape(verify_token)}">
@@ -251,7 +251,7 @@ def _page(
               <input id="mcp-url" readonly value="{html.escape(result["mcp_url"])}">
               <button type="button" class="ghost" data-copy="mcp-url">Copy</button>
             </div>
-            <label for="api-key">API key — shown once</label>
+            <label for="api-key">API key (shown once)</label>
             <div class="copy-row">
               <input id="api-key" readonly value="{html.escape(result["api_key"])}">
               <button type="button" class="ghost" data-copy="api-key">Copy</button>
@@ -381,7 +381,7 @@ def _page(
         <div class="workflow-line"></div>
         <div class="workflow-step">
           <span>2</span>
-          <div><strong>Claude selects a tool</strong><p>Maps, web signals, or people — one source at a time.</p></div>
+          <div><strong>Claude selects a tool</strong><p>Maps, web signals, or people: one source at a time.</p></div>
         </div>
         <div class="workflow-line"></div>
         <div class="workflow-step">
@@ -417,7 +417,7 @@ def _page(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <meta name="description" content="Lead Orbyt finds local businesses, web intent posts, and named people for Claude via MCP. You get CSVs. It does not send outreach.">
-  <title>Lead Orbyt — lead discovery for Claude</title>
+  <title>Lead Orbyt: lead discovery for Claude</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -1055,33 +1055,75 @@ def _page(
       background: var(--surface);
       border: 1px solid var(--outline);
     }}
-    footer.page-foot {{
-      margin-top: 36px;
-      color: var(--on-variant);
-      font-size: 12px;
-    }}
     body.landing .steps {{
       max-width: none;
       grid-template-columns: repeat(3, 1fr);
       gap: 22px;
       margin: 0;
-      padding: 30px 86px 20px;
+      padding: 30px 86px 42px;
       background: #ead9cc;
       border-top: 1px solid rgba(24,32,27,.1);
-    }}
-    body.landing footer.page-foot {{
-      margin: 0;
-      padding: 12px 86px 42px;
-      text-align: center;
-      background: #ead9cc;
       border-radius: 0 0 28px 28px;
+    }}
+    .site-footer {{
+      margin-top: 56px;
+      padding: 56px max(24px, calc((100vw - 1180px) / 2)) 40px;
+      background: #1d2e24;
+      color: #f6f3e9;
+    }}
+    .footer-inner {{
+      display: grid;
+      grid-template-columns: 1.4fr .8fr 1.2fr;
+      gap: 48px;
+      align-items: start;
+    }}
+    .footer-brand {{
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      color: inherit;
+      text-decoration: none;
+      max-width: 340px;
+    }}
+    .footer-brand .brand {{ color: #f6f3e9; }}
+    .footer-brand p {{
+      margin: 0;
+      color: #c8d2ca;
+      font-size: 13px;
+      line-height: 21px;
+    }}
+    .footer-nav {{
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 13px;
+      font-weight: 500;
+    }}
+    .footer-nav a {{
+      color: #f6f3e9;
+      text-decoration: none;
+    }}
+    .footer-nav a:hover {{ color: #b7e0c4; }}
+    .footer-meta {{
+      color: #c8d2ca;
+      font-size: 12px;
+      line-height: 20px;
+    }}
+    .footer-meta p {{ margin: 0 0 12px; }}
+    .footer-copy {{
+      margin-top: 36px;
+      padding-top: 22px;
+      border-top: 1px solid rgba(246,243,233,.12);
+      color: #9eaea4;
+      font-size: 12px;
     }}
     body.focused .nav a:not(.cta) {{ display: none; }}
     body.focused .hero h1 {{ font-size: clamp(36px, 5vw, 52px); }}
     body.focused .lede {{ margin: 0 auto; }}
     body.focused .card.result {{ text-align: left; }}
     body.focused .steps {{ margin-left: auto; margin-right: auto; }}
-    body.focused footer.page-foot {{ text-align: center; }}
+    body.focused .site-footer {{ margin-top: 48px; }}
+    body.focused .footer-inner {{ grid-template-columns: 1fr; gap: 28px; }}
     code {{ font-family: var(--mono); font-size: 0.92em; }}
     @media (max-width: 900px) {{
       .hero {{ grid-template-columns: 1fr; gap: 50px; padding: 68px 0; }}
@@ -1128,13 +1170,17 @@ def _page(
       .setup-section {{ padding: 38px 20px; margin: 0 -18px; border-radius: 0; }}
       body.landing .steps {{
         grid-template-columns: 1fr;
-        padding: 28px 20px;
+        padding: 28px 20px 36px;
         margin: 0 -18px;
-      }}
-      body.landing footer.page-foot {{
-        margin: 0 -18px;
-        padding: 10px 20px 38px;
         border-radius: 0;
+      }}
+      .site-footer {{
+        margin-top: 0;
+        padding: 44px 18px 32px;
+      }}
+      .footer-inner {{
+        grid-template-columns: 1fr;
+        gap: 28px;
       }}
       .copy-row {{ flex-direction: column; }}
     }}
@@ -1159,7 +1205,7 @@ def _page(
         {f'<div class="icon-wrap" aria-hidden="true">{_mark()}</div>' if focused else ""}
         <p class="hero-kicker">Agent-native lead research</p>
         <h1>Turn a conversation into a <em>lead list.</em></h1>
-        <p class="lede">Connect Lead Orbyt to Claude and research local businesses, active buying signals, or named decision-makers — without leaving the conversation.</p>
+        <p class="lede">Connect Lead Orbyt to Claude and research local businesses, active buying signals, or named decision-makers, without leaving the conversation.</p>
         {"" if focused else '''
         <div class="hero-actions">
           <a class="cta" href="#setup">Get MCP access <span aria-hidden="true">→</span></a>
@@ -1206,8 +1252,28 @@ def _page(
       <li><span class="num">2</span><span>Copy the config into Claude Desktop MCP settings.</span></li>
       <li><span class="num">3</span><span>Restart Claude Desktop and ask: “Find 10 commercial HVAC contractors in Dallas, TX.”</span></li>
     </ol>
-    <footer class="page-foot">The API key is shown once, after you confirm your email. MCP tools at /mcp still require the Bearer key.</footer>
   </main>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a class="footer-brand" href="/">
+        <span class="brand-lockup">
+          {_mark("mark")}
+          <span class="brand">Lead Orbyt</span>
+        </span>
+        <p>Lead research for Claude. Maps, web intent, and people search. It finds lists. It does not send outreach.</p>
+      </a>
+      <nav class="footer-nav" aria-label="Footer">
+        <a href="/#sources">Sources</a>
+        <a href="/#how">How it works</a>
+        <a href="/#setup">Get MCP access</a>
+      </nav>
+      <div class="footer-meta">
+        <p>The API key is shown once, after you confirm your email. MCP tools at /mcp still require the Bearer key.</p>
+        <p>Enrichment and paid email reveals stay opt-in. Reddit and X use official OAuth.</p>
+      </div>
+    </div>
+    <p class="footer-copy">© 2026 Lead Orbyt</p>
+  </footer>
   <script>
     document.querySelectorAll("[data-copy]").forEach((btn) => {{
       btn.addEventListener("click", async () => {{

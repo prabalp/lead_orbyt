@@ -55,7 +55,7 @@ These selectors were confirmed empirically and **will break if Google changes ma
 
 ### Web/social intent posts (`find_web_signals` / `web_jobs.py`)
 
-Separate from Maps. Call this when the user wants public posts that already express the need (a LinkedIn “looking for a speaker in Austin”, a Reddit thread, an X post, a Facebook listing). If they also want Maps businesses, call `find_leads_maps` as a second tool — order follows what they asked for first.
+Separate from Maps. Call this when the user wants public posts that already express the need (a LinkedIn “looking for a speaker in Austin”, a Reddit thread, an X post, a Facebook listing). If they also want Maps businesses, call `find_leads_maps` as a second tool. Order follows what they asked for first.
 
 ```
 query + location + max_results [+ icp] [+ sites]
@@ -69,7 +69,7 @@ web_signals.discover()  DuckDuckGo HTML `site:` search
 export web-signal CSV  (not mixed into the Maps enrichment schema)
 ```
 
-It uses scrapling against DuckDuckGo’s HTML SERP with `site:` filters — not Google `/search`, which robots.txt disallows. Disable with `LEADORBYT_WEB_SIGNALS_ENABLED=false`. Restrict default sites with `LEADORBYT_WEB_SIGNAL_SITES`; a call can pass a `sites` subset.
+It uses scrapling against DuckDuckGo’s HTML SERP with `site:` filters, not Google `/search`, which robots.txt disallows. Disable with `LEADORBYT_WEB_SIGNALS_ENABLED=false`. Restrict default sites with `LEADORBYT_WEB_SIGNAL_SITES`; a call can pass a `sites` subset.
 
 ### Enrichment details (`enrich_lead_list` / `enrich.py`)
 
@@ -144,9 +144,9 @@ Only when `goal_new_leads` is set. Tokens are words from job titles of previousl
 
 ### Agent labeling loop
 
-1. `list_unlabeled_leads` — free search, return only `agent_pending` people.
+1. `list_unlabeled_leads`: free search, return only `agent_pending` people.
 2. Caller judges each against the ICP.
-3. `submit_lead_verdicts` — writes `qualification_labels`.
+3. `submit_lead_verdicts`: writes `qualification_labels`.
 4. Later `find_people_leads(..., icp=...)` can `gate_accept` / `gate_reject`.
 
 There is **no** equivalent preview tool for business leads. `find_leads_maps(..., icp=...)` still scores rows, but unlabeled businesses stay fail-open in the CSV until the same verdicts (keyed by user+ICP, not entity type) accumulate.

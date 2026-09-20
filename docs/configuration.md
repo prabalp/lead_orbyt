@@ -74,4 +74,4 @@ OpenStreetMap/Overpass runs only when discovery extracted lat/lon.
 
 **Configured but unused:** `X_BEARER_TOKEN` / `sources/twitter.py` is not in `registry._SOURCES`.
 
-**Stubbed:** `INDEED_PUBLISHER_ID`, `LINKEDIN_API_KEY` — modules always report not integrated.
+**Stubbed:** `INDEED_PUBLISHER_ID`, `LINKEDIN_API_KEY`. Modules always report not integrated.

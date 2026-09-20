@@ -6,11 +6,11 @@ Architecture, pipelines, tool contracts, SQLite, and config live in **[docs/](do
 
 ## Independent discovery tools
 
-Call the source the user asked for first. If they want more than one, call the matching tools **one after another** — they are not bundled.
+Call the source the user asked for first. If they want more than one, call the matching tools **one after another**. They are not bundled.
 
-1. **Google Maps businesses** — `find_leads_maps` researches a Maps list (name, category, website, phone, address, plus code, maps URL, coordinates, and any contact Maps already shows). After review and explicit approval, `enrich_lead_list` visits websites and calls configured extras.
-2. **Web/social intent** — `find_web_signals` finds public posts already asking for that thing (LinkedIn, Reddit, X, Facebook) via DuckDuckGo HTML `site:` search. Optional `sites` subset. Does not run as part of `find_leads_maps`.
-3. **Person leads** — `find_people_leads` (BetterContact or Apollo) → optional offline ICP gate → optional paid email reveal. Paid lookups default to zero.
+1. **Google Maps businesses:** `find_leads_maps` researches a Maps list (name, category, website, phone, address, plus code, maps URL, coordinates, and any contact Maps already shows). After review and explicit approval, `enrich_lead_list` visits websites and calls configured extras.
+2. **Web/social intent:** `find_web_signals` finds public posts already asking for that thing (LinkedIn, Reddit, X, Facebook) via DuckDuckGo HTML `site:` search. Optional `sites` subset. Does not run as part of `find_leads_maps`.
+3. **Person leads:** `find_people_leads` (BetterContact or Apollo) → optional offline ICP gate → optional paid email reveal. Paid lookups default to zero.
 
 Claude is instructed by the MCP tool contracts to show each list and ask before enrichment or another source. A bare “find leads” request cannot trigger business enrichment, web search, or paid person lookups.
 
@@ -41,11 +41,11 @@ The server serves a public landing page at `/` that explains the Maps, web, and 
 - a one-time API key
 - a Claude Desktop `mcpServers` snippet using `mcp-remote`
 
-Opening the link does not mint the key — the page asks for an explicit confirm click, so email scanners cannot burn the token. Set `LEADORBYT_PUBLIC_URL` to the HTTPS origin you publish (no trailing slash). MCP tools at `/mcp` still require the Bearer key. Disable the form with `LEADORBYT_SIGNUP_ENABLED=false` if you only want `leadorbyt-admin`.
+Opening the link does not mint the key. The page asks for an explicit confirm click, so email scanners cannot burn the token. Set `LEADORBYT_PUBLIC_URL` to the HTTPS origin you publish (no trailing slash). MCP tools at `/mcp` still require the Bearer key. Disable the form with `LEADORBYT_SIGNUP_ENABLED=false` if you only want `leadorbyt-admin`.
 
 ```bash
 # from this directory so leadorbyt.db and leads_output land here
-python -m leadorbyt.server                  # default 0.0.0.0:8000 — open http://127.0.0.1:8000
+python -m leadorbyt.server                  # default 0.0.0.0:8000. Open http://127.0.0.1:8000
 # optional operator path:
 leadorbyt-admin create-user "<your name>"
 ```

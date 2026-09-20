@@ -179,6 +179,8 @@ def test_home_is_public():
     assert "find_web_signals" in response.text
     assert "find_people_leads" in response.text
     assert "does not send outreach" in response.text.lower()
+    assert "site-footer" in response.text
+    assert "© 2026 Lead Orbyt" in response.text
 
 
 def test_mcp_still_requires_key():

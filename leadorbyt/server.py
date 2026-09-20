@@ -60,7 +60,7 @@ def _discovery_result(path: str) -> dict:
         "next_action": (
             "Show the Google Maps business list. If the user also wants people "
             "already posting about this (LinkedIn, Reddit, X, Facebook), call "
-            "find_web_signals next — do not assume they want both. Then ask "
+            "find_web_signals next. Do not assume they want both. Then ask "
             "whether they want website enrichment of the Maps list. Do not call "
             "enrich_lead_list unless the user explicitly confirms."
         ),
@@ -90,7 +90,7 @@ async def find_leads_maps(niche: str, location: str, max_results: int = 20, icp:
     or spends enrichment credits. It only searches Google Maps (name, category,
     website, phone, address, plus code, maps URL, coordinates, and any
     email/socials Maps already publishes). It does NOT search LinkedIn/Reddit/X
-    /Facebook — that is `find_web_signals`. It does NOT search named people —
+    /Facebook; that is `find_web_signals`. It does NOT search named people;
     that is `find_people_leads`. If the user wants more than one of those,
     call the matching tools one after another, starting with the source they
     asked for first.
@@ -211,7 +211,7 @@ async def find_web_signals(
 ) -> dict:
     """Find public posts already asking for `query` on LinkedIn, Reddit, X, and Facebook.
 
-    Uses a DuckDuckGo HTML `site:` search via scrapling — not Google Maps and
+    Uses a DuckDuckGo HTML `site:` search via scrapling, not Google Maps and
     not BetterContact. Call this instead of `find_leads_maps` when the user wants
     people posting a need (e.g. “looking for a speaker in Austin”). Call
     `find_leads_maps` first if they asked for local businesses; call this first if

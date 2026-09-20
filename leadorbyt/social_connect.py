@@ -4,8 +4,8 @@ This is NOT "type your LinkedIn password into our stealth browser." That
 would scrape authenticated pages those networks forbid. The only logins we
 run are documented OAuth 2 authorization-code flows:
 
-- Reddit (`identity` + `read`) — same API `sources/reddit.py` already uses
-- X (`tweet.read users.read offline.access`) — recent-search API
+- Reddit (`identity` + `read`): same API `sources/reddit.py` already uses
+- X (`tweet.read users.read offline.access`): recent-search API
 
 LinkedIn and Facebook have no self-serve lead-search API. Public `site:`
 results still work without login. Connecting them here would only collect
