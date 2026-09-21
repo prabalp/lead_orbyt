@@ -728,12 +728,16 @@ async def connect_social_account(provider: str) -> dict:
 
 @server.tool()
 async def disconnect_social_account(provider: str) -> dict:
-    """Forget a previously connected Reddit or X account for this tenant."""
+    """Forget a previously connected Reddit or X account for this tenant.
+
+    Also revokes the token with the provider (best-effort -- disconnection
+    still succeeds locally even if the provider's revoke call fails).
+    """
     user_id = auth.require_user_id()
     name = (provider or "").strip().lower()
     if name not in social_connect.CONNECTABLE:
         raise RuntimeError(f"error: invalid_input: cannot disconnect {provider!r}")
-    await asyncio.to_thread(store.delete_connected_account, user_id, name)
+    await asyncio.to_thread(social_connect.disconnect, user_id, name)
     return {"status": "disconnected", "provider": name}
 
 
@@ -765,8 +769,37 @@ async def submit_lead_verdicts(icp: str, verdicts: list[dict]) -> dict:
     return {"labels_added": len(verdicts)}
 
 
+def _log_social_login_config() -> None:
+    """Warn at startup about missing env vars that block social login, rather
+    than letting the first `connect_social_account` call fail with a vague
+    error. Only var names are logged -- never a value."""
+    if not config.TOKEN_ENCRYPTION_KEY:
+        logger.warning(
+            "LEADORBYT_TOKEN_ENCRYPTION_KEY is not set -- social login is disabled "
+            "(list_social_connections will report encryption_ready=false)"
+        )
+    missing_reddit = [
+        name
+        for name, value in (
+            ("REDDIT_CLIENT_ID", config.REDDIT_CLIENT_ID),
+            ("REDDIT_CLIENT_SECRET", config.REDDIT_CLIENT_SECRET),
+            ("REDDIT_USER_AGENT", config.REDDIT_USER_AGENT),
+        )
+        if not value
+    ]
+    if missing_reddit:
+        logger.warning(
+            "Reddit OAuth login is disabled -- missing env var(s): %s",
+            ", ".join(missing_reddit),
+        )
+    # X_OAUTH_CLIENT_SECRET is optional (PKCE public client) -- see social_connect.provider_configured.
+    if not config.X_OAUTH_CLIENT_ID:
+        logger.warning("X OAuth login is disabled -- missing env var: X_OAUTH_CLIENT_ID")
+
+
 def create_app():
     """HTTP app: public signup UI plus API-key-gated MCP at /mcp."""
+    _log_social_login_config()
     signup.register(server)
     social_connect.register(server)
     # The SDK's default DNS-rebinding protection only allows Host: 127.0.0.1/localhost,

@@ -72,6 +72,55 @@ def test_connection_summary_lists_unsupported(isolated_db, monkeypatch):
     assert names["facebook"]["connectable"] is False
 
 
+def test_disconnect_revokes_and_deletes(isolated_db, monkeypatch):
+    _key(monkeypatch)
+    user_id = store.create_user("ada@example.com")
+    social_connect._store_tokens(
+        user_id, "reddit", {"access_token": "raw-access", "refresh_token": "raw-refresh", "expires_in": 3600}, "ada"
+    )
+
+    revoked = []
+
+    class FakeResponse:
+        status_code = 200
+
+    def fake_post(url, **kwargs):
+        assert url == "https://www.reddit.com/api/v1/revoke_token"
+        revoked.append(kwargs["data"]["token"])
+        return FakeResponse()
+
+    monkeypatch.setattr(social_connect.httpx, "post", fake_post)
+
+    social_connect.disconnect(user_id, "reddit")
+
+    assert set(revoked) == {"raw-access", "raw-refresh"}
+    assert store.get_connected_account(user_id, "reddit") is None
+
+
+def test_disconnect_survives_revoke_failure(isolated_db, monkeypatch):
+    _key(monkeypatch)
+    user_id = store.create_user("ada@example.com")
+    social_connect._store_tokens(
+        user_id, "reddit", {"access_token": "raw-access", "refresh_token": "", "expires_in": 3600}, "ada"
+    )
+
+    def fake_post(url, **kwargs):
+        raise social_connect.httpx.ConnectError("boom")
+
+    monkeypatch.setattr(social_connect.httpx, "post", fake_post)
+
+    social_connect.disconnect(user_id, "reddit")  # must not raise
+
+    assert store.get_connected_account(user_id, "reddit") is None
+
+
+def test_disconnect_noop_when_never_connected(isolated_db, monkeypatch):
+    _key(monkeypatch)
+    user_id = store.create_user("ada@example.com")
+    social_connect.disconnect(user_id, "reddit")  # must not raise
+    assert store.get_connected_account(user_id, "reddit") is None
+
+
 def test_connect_ticket_route_is_public(isolated_db, monkeypatch):
     _key(monkeypatch)
     user_id = store.create_user("ada@example.com")

@@ -257,6 +257,55 @@ def _reddit_exchange(code: str) -> dict:
     return response.json()
 
 
+def _reddit_revoke(token: str, token_type_hint: str) -> None:
+    try:
+        response = httpx.post(
+            "https://www.reddit.com/api/v1/revoke_token",
+            auth=(config.REDDIT_CLIENT_ID, config.REDDIT_CLIENT_SECRET),
+            data={"token": token, "token_type_hint": token_type_hint},
+            headers={"User-Agent": config.REDDIT_USER_AGENT},
+            timeout=config.SOURCE_HTTP_TIMEOUT,
+        )
+        if response.status_code >= 400:
+            logger.warning("Reddit token revoke returned %s", response.status_code)
+    except httpx.HTTPError:
+        logger.warning("Reddit token revoke request failed")
+
+
+def _x_revoke(token: str, token_type_hint: str) -> None:
+    try:
+        response = httpx.post(
+            "https://api.x.com/2/oauth2/revoke",
+            data={"token": token, "token_type_hint": token_type_hint},
+            headers=_x_headers(),
+            timeout=config.SOURCE_HTTP_TIMEOUT,
+        )
+        if response.status_code >= 400:
+            logger.warning("X token revoke returned %s", response.status_code)
+    except httpx.HTTPError:
+        logger.warning("X token revoke request failed")
+
+
+def disconnect(user_id: str, provider: str) -> None:
+    """Revoke the stored tokens with the provider (best-effort) and forget them."""
+    row = store.get_connected_account(user_id, provider)
+    if row is not None:
+        access = ""
+        refresh = ""
+        try:
+            access = decrypt_secret(row.get("access_token_enc") or "")
+            refresh = decrypt_secret(row.get("refresh_token_enc") or "")
+        except Exception:
+            logger.warning("Could not decrypt %s token for user %s during disconnect", provider, user_id)
+        revoke = _reddit_revoke if provider == "reddit" else _x_revoke if provider == "x" else None
+        if revoke is not None:
+            if access:
+                revoke(access, "access_token")
+            if refresh:
+                revoke(refresh, "refresh_token")
+    store.delete_connected_account(user_id, provider)
+
+
 def _reddit_refresh(refresh_token: str) -> dict:
     response = httpx.post(
         "https://www.reddit.com/api/v1/access_token",
