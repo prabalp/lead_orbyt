@@ -21,9 +21,11 @@ import asyncio
 import csv
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
 import uvicorn
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import auth, config, jobs, people_jobs, qualify_ml, signal_jobs, signup, social_connect, store, web_jobs
 from .enrich import enrich_website
@@ -767,7 +769,19 @@ def create_app():
     """HTTP app: public signup UI plus API-key-gated MCP at /mcp."""
     signup.register(server)
     social_connect.register(server)
-    app = server.streamable_http_app()
+    # The SDK's default DNS-rebinding protection only allows Host: 127.0.0.1/localhost,
+    # which rejects every request once this runs behind a reverse proxy on a real domain
+    # (Caddy forwards the original Host header, e.g. lead.orbyt.in) -- so it must be told
+    # the public host explicitly, taken from LEADORBYT_PUBLIC_URL.
+    public_host = urlparse(config.PUBLIC_URL).netloc
+    app = server.streamable_http_app(
+        host=public_host,
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=[public_host],
+            allowed_origins=[config.PUBLIC_URL],
+        ),
+    )
     app.add_middleware(auth.ApiKeyAuthMiddleware)
     return app
 
