@@ -20,6 +20,7 @@ day that don't want to hold an MCP call open for 1-2 minutes per search.
 import asyncio
 import csv
 import logging
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import uvicorn
@@ -59,8 +60,9 @@ def _discovery_result(path: str) -> dict:
         "lead_count": _count_csv_rows(path),
         "enriched": False,
         "next_action": (
-            "Show the Google Maps business list. If the user also wants people "
-            "already posting about this (LinkedIn, Reddit, X, Facebook), call "
+            "Call read_result_csv(result_path=...) to retrieve the rows, then show "
+            "the Google Maps business list. If the user also wants people already "
+            "posting about this (LinkedIn, Reddit, X, Facebook), call "
             "find_web_signals next. Do not assume they want both. Then ask "
             "whether they want website enrichment of the Maps list. Do not call "
             "enrich_lead_list unless the user explicitly confirms."
@@ -167,6 +169,8 @@ async def get_search_status(job_id: str) -> dict:
     :param job_id: The job id returned by `submit_search`.
     :return: dict with `status` ("queued"/"running"/"done"/"error"), `result_path`,
         `error`, `error_type`, `stage`, `items_discovered`, `items_enriched`, `items_total`.
+        Once `status` is "done", call `read_result_csv(result_path=...)` to
+        retrieve the actual rows -- `result_path` alone is just a download URL.
     """
     user_id = auth.require_user_id()
     result = jobs.status(job_id, user_id)
@@ -182,9 +186,10 @@ async def get_search_status(job_id: str) -> dict:
             {
                 "enriched": False,
                 "next_action": (
-                    "Show the researched Maps list. If the user also wants web/social "
-                    "intent posts, call find_web_signals separately. Ask before "
-                    "enrich_lead_list."
+                    "Call read_result_csv(result_path=...) to retrieve the rows, "
+                    "then show the researched Maps list. If the user also wants "
+                    "web/social intent posts, call find_web_signals separately. "
+                    "Ask before enrich_lead_list."
                 ),
             }
         )
@@ -203,19 +208,21 @@ async def find_web_signals(
 ) -> dict:
     """Find public posts already asking for `query` on LinkedIn, Reddit, X, and Facebook.
 
-    Uses a DuckDuckGo HTML `site:` search via scrapling, not Google Maps and
-    not BetterContact. Call this instead of `find_leads_maps` when the user wants
-    people posting a need (e.g. “looking for a speaker in Austin”). Call
-    `find_leads_maps` first if they asked for local businesses; call this first if
-    they asked for social/intent posts. If they want both, call the tools
-    sequentially. Do not call this automatically after Maps.
+    Uses a `site:` search (Serper when configured, else a DuckDuckGo HTML
+    scrape) via scrapling, not Google Maps and not BetterContact. Call this
+    instead of `find_leads_maps` when the user wants people posting a need
+    (e.g. "looking for a speaker in Austin"). Call `find_leads_maps` first if
+    they asked for local businesses; call this first if they asked for
+    social/intent posts. If they want both, call the tools sequentially. Do
+    not call this automatically after Maps.
 
     :param query: What people would post, e.g. "speaking engagement", "looking for a CRM".
     :param location: Optional place to include in the search, e.g. "Austin, TX".
     :param max_results: Maximum posts to return (spread across selected sites).
     :param icp: Optional ICP text for offline qualification.
     :param sites: Optional subset of linkedin, reddit, x, facebook. Default is all enabled.
-    :return: CSV path, count, and next_action.
+    :return: CSV download URL, count, and next_action. Call
+        read_result_csv(result_path=...) to actually retrieve the rows.
     """
     user_id = auth.require_user_id()
     try:
@@ -231,9 +238,10 @@ async def find_web_signals(
         "result_path": files.download_url(path),
         "signal_count": _count_csv_rows(path) if path else 0,
         "next_action": (
-            "Show these web/social posts. If the user also wants Google Maps "
-            "businesses, call find_leads_maps next. If they want named people at "
-            "companies, call find_people_leads. Do not chain extra sources unless asked."
+            "Call read_result_csv(result_path=...) to retrieve the rows, then show "
+            "these web/social posts. If the user also wants Google Maps businesses, "
+            "call find_leads_maps next. If they want named people at companies, "
+            "call find_people_leads. Do not chain extra sources unless asked."
         ),
     }
 
@@ -256,7 +264,11 @@ async def submit_web_signal_search(
 
 @server.tool()
 async def get_web_signal_search_status(job_id: str) -> dict:
-    """Status of a job from `submit_web_signal_search`."""
+    """Status of a job from `submit_web_signal_search`.
+
+    Once `status` is "done", call `read_result_csv(result_path=...)` to
+    retrieve the actual rows -- `result_path` alone is just a download URL.
+    """
     user_id = auth.require_user_id()
     result = web_jobs.status(job_id, user_id)
     if result is None:
@@ -312,7 +324,8 @@ async def enrich_lead_list(lead_list_path: str, icp: str = "") -> dict:
 
     :param lead_list_path: `result_path` returned by `find_leads_maps`.
     :param icp: Optional ICP text for post-enrichment offline qualification.
-    :return: Enriched CSV path, row count, and completion metadata.
+    :return: Enriched CSV download URL, row count, and completion metadata.
+        Call read_result_csv(result_path=...) to retrieve the enriched rows.
     """
     user_id = auth.require_user_id()
     try:
@@ -327,6 +340,98 @@ async def enrich_lead_list(lead_list_path: str, icp: str = "") -> dict:
         "lead_count": _count_csv_rows(result_path),
         "enriched": True,
     }
+
+
+RESULT_CSV_MAX_LIMIT = 200
+
+
+@server.tool()
+async def read_result_csv(result_path: str, offset: int = 0, limit: int = 100) -> dict:
+    """Read rows out of a result CSV so you can actually show them to the user.
+
+    Every search/enrichment tool (find_leads_maps, find_web_signals,
+    find_people_leads, find_reddit_signals, enrich_lead_list, and the
+    submit_*/get_*_status pairs) returns a `result_path` that is only a
+    download URL -- it does NOT put the rows in front of you. Call this with
+    that exact `result_path` (copied verbatim from that tool's response) to
+    retrieve and page through the actual data.
+
+    :param result_path: The exact `result_path` (or `source_path`) string
+        returned by another tool, for this same authenticated tenant.
+    :param offset: Zero-based row index to start from. Use this to page
+        through a result set larger than one call's `limit` across repeated
+        calls (e.g. offset=0, then offset=100, then offset=200, ...).
+    :param limit: Max rows to return in this call. Capped server-side at
+        200 regardless of what's requested, since this goes into your own
+        context window, not a file download.
+    :return: dict with `path`, `total_rows` (rows in the whole CSV),
+        `offset`, `limit`, `columns`, and `rows` (a list of {column: value}
+        dicts covering just this page).
+    """
+    user_id = auth.require_user_id()
+    offset = max(0, offset)
+    limit = max(1, min(limit, RESULT_CSV_MAX_LIMIT))
+    try:
+        path = files.resolve_owned_path(result_path, user_id)
+    except Exception as exc:
+        _raise_as_runtime_error(exc)
+
+    columns: list[str] = []
+    total_rows = 0
+    page: list[dict] = []
+    with open(path, newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        columns = reader.fieldnames or []
+        for i, row in enumerate(reader):
+            if offset <= i < offset + limit:
+                page.append(row)
+            total_rows += 1
+
+    return {
+        "path": result_path,
+        "total_rows": total_rows,
+        "offset": offset,
+        "limit": limit,
+        "columns": columns,
+        "rows": page,
+    }
+
+
+@server.tool()
+async def list_result_files(prefix: str = "") -> dict:
+    """List this tenant's own result CSVs, to recover a `result_path` you lost track of.
+
+    Use this if an earlier tool call's `result_path` fell out of context
+    (e.g. deep in a long conversation) and you need to get back to it,
+    rather than re-running the search. Follow up with
+    `read_result_csv(result_path=...)` to read the rows.
+
+    :param prefix: Optional case-insensitive substring to filter filenames by,
+        e.g. "web_signals" or a niche/query you searched for earlier.
+    :return: dict with `files`: a list of {name, result_path, size_bytes,
+        modified_at}, newest first.
+    """
+    user_id = auth.require_user_id()
+    root = config.OUTPUT_DIR / user_id
+    if not root.is_dir():
+        return {"files": []}
+
+    needle = prefix.strip().lower()
+    entries = []
+    for path in root.glob("*.csv"):
+        if needle and needle not in path.name.lower():
+            continue
+        stat = path.stat()
+        entries.append(
+            {
+                "name": path.name,
+                "result_path": files.download_url(str(path)),
+                "size_bytes": stat.st_size,
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            }
+        )
+    entries.sort(key=lambda e: e["modified_at"], reverse=True)
+    return {"files": entries}
 
 
 @server.tool()
@@ -437,7 +542,8 @@ async def find_people_leads(
     :param headcount_max: Optional maximum employer headcount.
     :param industries: Optional employer industry/keyword filter.
     :param technologies: Optional employer technology-stack filter (BetterContact only).
-    :return: Download URL for the generated CSV file.
+    :return: Download URL for the generated CSV file. Call
+        read_result_csv(result_path=...) with it to retrieve the rows.
     """
     user_id = auth.require_user_id()
     max_paid_lookups = min(max_paid_lookups, config.MAX_PAID_LOOKUPS_CEILING)
@@ -491,7 +597,8 @@ async def get_people_search_status(job_id: str) -> dict:
 
     :param job_id: The job id returned by `submit_people_search`.
     :return: dict with `status`, `result_path`, `error`, `error_type`, `stage`,
-        `people_found`, `paid_lookups_used`.
+        `people_found`, `paid_lookups_used`. Once `status` is "done", call
+        `read_result_csv(result_path=...)` to retrieve the actual rows.
     """
     user_id = auth.require_user_id()
     result = people_jobs.status(job_id, user_id)
@@ -598,7 +705,8 @@ async def find_reddit_signals(
     :param time_filter: Reddit search time window ("hour", "day", "week", "month", "year", "all").
     :param max_results: Maximum number of matching posts to return.
     :return: Download URL for the generated CSV, or a login_required payload
-        asking the user to connect Reddit in the browser.
+        asking the user to connect Reddit in the browser. Call
+        read_result_csv(result_path=...) with it to retrieve the rows.
     """
     user_id = auth.require_user_id()
     user_token = await asyncio.to_thread(social_connect.valid_access_token, user_id, "reddit")
@@ -644,6 +752,8 @@ async def get_reddit_signal_search_status(job_id: str) -> dict:
 
     :param job_id: The job id returned by `submit_reddit_signal_search`.
     :return: dict with `status`, `result_path`, `error`, `error_type`, `stage`, `signals_found`.
+        Once `status` is "done", call `read_result_csv(result_path=...)` to
+        retrieve the actual rows.
     """
     user_id = auth.require_user_id()
     result = signal_jobs.status(job_id, user_id)
