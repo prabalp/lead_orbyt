@@ -20,14 +20,13 @@ day that don't want to hold an MCP call open for 1-2 minutes per search.
 import asyncio
 import csv
 import logging
-from pathlib import Path
 from urllib.parse import urlparse
 
 import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import auth, config, jobs, people_jobs, qualify_ml, signal_jobs, signup, social_connect, store, web_jobs
+from . import auth, config, files, jobs, people_jobs, qualify_ml, signal_jobs, signup, social_connect, store, web_jobs
 from .enrich import enrich_website
 from .errors import ErrorType, LeadOrbytError
 from .merge import _normalize
@@ -56,7 +55,7 @@ def _count_csv_rows(path: str) -> int:
 def _discovery_result(path: str) -> dict:
     return {
         "status": "discovery_complete",
-        "result_path": path,
+        "result_path": files.download_url(path),
         "lead_count": _count_csv_rows(path),
         "enriched": False,
         "next_action": (
@@ -70,18 +69,7 @@ def _discovery_result(path: str) -> dict:
 
 
 def _user_csv_path(path: str, user_id: str) -> str:
-    candidate = Path(path).expanduser().resolve()
-    allowed_root = (config.OUTPUT_DIR / user_id).resolve()
-    try:
-        candidate.relative_to(allowed_root)
-    except ValueError as exc:
-        raise LeadOrbytError(
-            ErrorType.INVALID_INPUT,
-            "lead list must be a CSV previously created for the authenticated user",
-        ) from exc
-    if candidate.suffix.lower() != ".csv" or not candidate.is_file():
-        raise LeadOrbytError(ErrorType.NOT_FOUND, "lead-list CSV does not exist")
-    return str(candidate)
+    return files.resolve_owned_path(path, user_id)
 
 
 @server.tool()
@@ -200,6 +188,8 @@ async def get_search_status(job_id: str) -> dict:
                 ),
             }
         )
+    if result.get("result_path"):
+        result["result_path"] = files.download_url(result["result_path"])
     return result
 
 
@@ -238,7 +228,7 @@ async def find_web_signals(
     path = result["result_path"]
     return {
         "status": "web_signals_complete",
-        "result_path": path,
+        "result_path": files.download_url(path),
         "signal_count": _count_csv_rows(path) if path else 0,
         "next_action": (
             "Show these web/social posts. If the user also wants Google Maps "
@@ -276,6 +266,8 @@ async def get_web_signal_search_status(job_id: str) -> dict:
             "error": "no such job id",
             "error_type": ErrorType.NOT_FOUND.value,
         }
+    if result.get("result_path"):
+        result["result_path"] = files.download_url(result["result_path"])
     return result
 
 
@@ -330,8 +322,8 @@ async def enrich_lead_list(lead_list_path: str, icp: str = "") -> dict:
         _raise_as_runtime_error(exc)
     return {
         "status": "enrichment_complete",
-        "source_path": source_path,
-        "result_path": result_path,
+        "source_path": files.download_url(source_path),
+        "result_path": files.download_url(result_path),
         "lead_count": _count_csv_rows(result_path),
         "enriched": True,
     }
@@ -445,7 +437,7 @@ async def find_people_leads(
     :param headcount_max: Optional maximum employer headcount.
     :param industries: Optional employer industry/keyword filter.
     :param technologies: Optional employer technology-stack filter (BetterContact only).
-    :return: Absolute path to the generated CSV file.
+    :return: Download URL for the generated CSV file.
     """
     user_id = auth.require_user_id()
     max_paid_lookups = min(max_paid_lookups, config.MAX_PAID_LOOKUPS_CEILING)
@@ -460,7 +452,7 @@ async def find_people_leads(
         _raise_as_runtime_error(exc)
     if result["error"]:
         raise RuntimeError(f"error: {result.get('error_type') or ErrorType.INTERNAL.value}: {result['error']}")
-    return result["result_path"]
+    return files.download_url(result["result_path"])
 
 
 @server.tool()
@@ -510,6 +502,8 @@ async def get_people_search_status(job_id: str) -> dict:
             "error": "no such job id",
             "error_type": ErrorType.NOT_FOUND.value,
         }
+    if result.get("result_path"):
+        result["result_path"] = files.download_url(result["result_path"])
     return result
 
 
@@ -603,7 +597,7 @@ async def find_reddit_signals(
     :param sort: Reddit search sort order ("new", "relevance", "top", "comments").
     :param time_filter: Reddit search time window ("hour", "day", "week", "month", "year", "all").
     :param max_results: Maximum number of matching posts to return.
-    :return: Absolute path to the generated CSV, or a login_required payload
+    :return: Download URL for the generated CSV, or a login_required payload
         asking the user to connect Reddit in the browser.
     """
     user_id = auth.require_user_id()
@@ -620,7 +614,7 @@ async def find_reddit_signals(
         _raise_as_runtime_error(exc)
     if result["error"]:
         raise RuntimeError(f"error: {result.get('error_type') or ErrorType.INTERNAL.value}: {result['error']}")
-    return result["result_path"]
+    return files.download_url(result["result_path"])
 
 
 @server.tool()
@@ -660,6 +654,8 @@ async def get_reddit_signal_search_status(job_id: str) -> dict:
             "error": "no such job id",
             "error_type": ErrorType.NOT_FOUND.value,
         }
+    if result.get("result_path"):
+        result["result_path"] = files.download_url(result["result_path"])
     return result
 
 
@@ -802,6 +798,7 @@ def create_app():
     _log_social_login_config()
     signup.register(server)
     social_connect.register(server)
+    files.register(server)
     # The SDK's default DNS-rebinding protection only allows Host: 127.0.0.1/localhost,
     # which rejects every request once this runs behind a reverse proxy on a real domain
     # (Caddy forwards the original Host header, e.g. lead.orbyt.in) -- so it must be told

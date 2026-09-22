@@ -164,7 +164,12 @@ async def test_find_people_leads_clamps_max_paid_lookups(isolated_db, monkeypatc
         return "job1"
 
     async def fake_wait_for(job_id):
-        return {"status": "done", "result_path": "/tmp/out.csv", "error": None, "error_type": None}
+        return {
+            "status": "done",
+            "result_path": str(config.OUTPUT_DIR / "user1" / "out.csv"),
+            "error": None,
+            "error_type": None,
+        }
 
     monkeypatch.setattr(people_jobs, "submit", fake_submit)
     monkeypatch.setattr(people_jobs, "wait_for", fake_wait_for)
