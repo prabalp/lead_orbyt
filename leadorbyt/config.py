@@ -86,10 +86,18 @@ QUERY_EXPANSION_MAX_ROUNDS = int(os.environ.get("LEADORBYT_QUERY_EXPANSION_MAX_R
 QUERY_EXPANSION_TOKENS_PER_ROUND = int(os.environ.get("LEADORBYT_QUERY_EXPANSION_TOKENS_PER_ROUND", "3"))
 
 # --- Web/social intent search (see web_signals.py / web_jobs.py) ---
-# find_web_signals runs a DuckDuckGo HTML search (scrapling Fetcher, stealth
-# if blocked) with site: filters for LinkedIn, Reddit, X, and Facebook.
-# Separate from find_leads_maps (Google Maps). Google's /search is not used:
-# that path is disallowed by robots.txt, which this project already obeys.
+# find_web_signals searches with site: filters for LinkedIn, Reddit, X, and
+# Facebook, separate from find_leads_maps (Google Maps). Google's /search is
+# not used: that path is disallowed by robots.txt, which this project
+# already obeys.
+#
+# Brave Search API is used when BRAVE_SEARCH_API_KEY is set (documented REST
+# JSON endpoint, no bot-detection risk). Without a key, this falls back to
+# scraping DuckDuckGo's public HTML SERP (scrapling Fetcher, stealth if
+# blocked) -- unauthenticated and free, but DDG increasingly serves an
+# "anomaly" bot-check page instead of results to datacenter IPs, which the
+# fast path can't always distinguish from a real empty result.
+BRAVE_SEARCH_API_KEY = os.environ.get("BRAVE_SEARCH_API_KEY", "")
 WEB_SIGNALS_ENABLED = os.environ.get("LEADORBYT_WEB_SIGNALS_ENABLED", "true").lower() != "false"
 WEB_SIGNAL_SITES = {
     s.strip().lower()

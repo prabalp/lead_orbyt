@@ -1,4 +1,4 @@
-"""Web/social intent discovery via a public HTML search engine + scrapling.
+"""Web/social intent discovery via search, with a scraped-HTML fallback.
 
 When someone is buying a speaking engagement, looking for a CRM, hiring a
 plumber, etc., people already post that on LinkedIn, Reddit, X, and Facebook.
@@ -6,12 +6,19 @@ A `site:` search finds those posts. This module is that pass: it does NOT
 replace Google Maps business discovery, and it does not log into any social
 network.
 
-Why DuckDuckGo HTML, not Google Search:
-    This project already refuses URLs that robots.txt disallows (see
-    robots.py / discovery.py). Google's `/search` is disallowed for crawlers;
-    `html.duckduckgo.com/html/` is the public HTML SERP we can fetch with the
-    same scrapling Fetcher used for website enrichment, escalating to the
-    stealth pool only when the fast path looks blocked.
+Two ways to run a query, tried in this order:
+
+1. Brave Search API (`config.BRAVE_SEARCH_API_KEY` set) -- a documented JSON
+   REST endpoint, no scraping/bot-detection risk.
+2. DuckDuckGo HTML SERP scrape (no key configured, or as a hard fallback) --
+   `html.duckduckgo.com/html/` is fetched with the same scrapling Fetcher
+   used for website enrichment, escalating to the stealth pool only when the
+   fast path looks blocked. Google's `/search` is never used here: that path
+   is disallowed by robots.txt, which this project already obeys. DDG
+   increasingly answers datacenter IPs with a 200/202 "anomaly" bot-check
+   page instead of real results -- `_looks_blocked` cannot tell that apart
+   from a real empty SERP, so this path is a best-effort fallback, not a
+   reliable primary.
 
 Selectors for the DDG HTML SERP were confirmed against the public markup
 (`div.result`, `a.result__a`, `.result__snippet`) and will break if DDG
@@ -29,6 +36,7 @@ from scrapling.spiders import Response
 from . import backoff, browser_pool, config, robots
 from .errors import ErrorType, LeadOrbytError
 from .extractors import EMAIL_RE, _is_junk_email
+from .sources.base import get_json
 
 logger = logging.getLogger("leadorbyt.web_signals")
 
@@ -177,6 +185,55 @@ def dedup_key(signal: dict) -> str:
     return f"web:{signal.get('url', '')}"
 
 
+BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+
+
+def parse_brave_json(data: dict, discovered_by_query: str) -> list[dict]:
+    """Turn a Brave Search API response into signal rows, same shape as parse_ddg_html."""
+    items: list[dict] = []
+    seen_urls: set[str] = set()
+    for result in (data.get("web") or {}).get("results") or []:
+        url = result.get("url") or ""
+        if not url or url in seen_urls:
+            continue
+        host = urlparse(url).netloc.lower()
+        if "duckduckgo.com" in host or "bing.com" in host or host.endswith("google.com"):
+            continue
+        seen_urls.add(url)
+        title = result.get("title") or ""
+        snippet = result.get("description") or ""
+        source = source_from_url(url)
+        items.append(
+            {
+                "source": source,
+                "author": author_from_url(url, source),
+                "community": community_from_url(url, source),
+                "post_title": title,
+                "post_body": snippet[:500],
+                "url": url,
+                "email": emails_from_text(f"{title} {snippet}"),
+                "discovered_by_query": discovered_by_query,
+            }
+        )
+    return items
+
+
+async def _fetch_brave(query: str) -> list[dict] | None:
+    """Query the Brave Search API. Returns None on any failure so callers can fall back to DDG."""
+    data = await get_json(
+        BRAVE_WEB_SEARCH_URL,
+        headers={
+            "Accept": "application/json",
+            "X-Subscription-Token": config.BRAVE_SEARCH_API_KEY,
+        },
+        params={"q": query, "count": 20},
+        source="brave_search",
+    )
+    if not isinstance(data, dict):
+        return None
+    return parse_brave_json(data, query)
+
+
 async def _fetch_serp(query: str) -> Response | None:
     search_url = f"{DDG_HTML}?q={quote_plus(query)}"
     if not await robots.can_fetch(search_url):
@@ -243,15 +300,23 @@ async def discover(
     for site in site_list:
         query = build_query(niche, location, SITE_FILTERS[site])
         logger.info("Web signal search %s: %r", site, query)
-        try:
-            response = await _fetch_serp(query)
-        except LeadOrbytError as exc:
-            logger.warning("Skipping %s web search: %s", site, exc)
-            continue
-        if response is None:
-            continue
+
+        items: list[dict] | None = None
+        if config.BRAVE_SEARCH_API_KEY:
+            items = await _fetch_brave(query)
+            if items is None:
+                logger.warning("Brave search failed for %r; falling back to DDG scrape", query)
+
+        if items is None:
+            try:
+                response = await _fetch_serp(query)
+            except LeadOrbytError as exc:
+                logger.warning("Skipping %s web search: %s", site, exc)
+                continue
+            items = parse_ddg_html(response, query) if response is not None else []
+
         taken = 0
-        for item in parse_ddg_html(response, query):
+        for item in items:
             if item["url"] in seen:
                 continue
             seen.add(item["url"])
