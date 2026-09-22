@@ -226,7 +226,10 @@ async def _fetch_serper(query: str) -> list[dict] | None:
             "Content-Type": "application/json",
             "X-API-KEY": config.SERPER_API_KEY,
         },
-        json_body={"q": query, "num": 20},
+        # Serper's free tier rejects num > 10 outright ("Query pattern not
+        # allowed for free accounts", HTTP 400) -- 10 is Google's own default
+        # results-per-page too, so this isn't a meaningfully smaller result set.
+        json_body={"q": query, "num": 10},
         source="serper_search",
     )
     if not isinstance(data, dict):
