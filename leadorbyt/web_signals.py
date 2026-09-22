@@ -8,8 +8,8 @@ network.
 
 Two ways to run a query, tried in this order:
 
-1. Brave Search API (`config.BRAVE_SEARCH_API_KEY` set) -- a documented JSON
-   REST endpoint, no scraping/bot-detection risk.
+1. Serper (`config.SERPER_API_KEY` set, google.serper.dev) -- a documented
+   JSON REST endpoint over Google results, no scraping/bot-detection risk.
 2. DuckDuckGo HTML SERP scrape (no key configured, or as a hard fallback) --
    `html.duckduckgo.com/html/` is fetched with the same scrapling Fetcher
    used for website enrichment, escalating to the stealth pool only when the
@@ -36,7 +36,7 @@ from scrapling.spiders import Response
 from . import backoff, browser_pool, config, robots
 from .errors import ErrorType, LeadOrbytError
 from .extractors import EMAIL_RE, _is_junk_email
-from .sources.base import get_json
+from .sources.base import post_json
 
 logger = logging.getLogger("leadorbyt.web_signals")
 
@@ -185,15 +185,15 @@ def dedup_key(signal: dict) -> str:
     return f"web:{signal.get('url', '')}"
 
 
-BRAVE_WEB_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+SERPER_SEARCH_URL = "https://google.serper.dev/search"
 
 
-def parse_brave_json(data: dict, discovered_by_query: str) -> list[dict]:
-    """Turn a Brave Search API response into signal rows, same shape as parse_ddg_html."""
+def parse_serper_json(data: dict, discovered_by_query: str) -> list[dict]:
+    """Turn a Serper (google.serper.dev) response into signal rows, same shape as parse_ddg_html."""
     items: list[dict] = []
     seen_urls: set[str] = set()
-    for result in (data.get("web") or {}).get("results") or []:
-        url = result.get("url") or ""
+    for result in data.get("organic") or []:
+        url = result.get("link") or ""
         if not url or url in seen_urls:
             continue
         host = urlparse(url).netloc.lower()
@@ -201,7 +201,7 @@ def parse_brave_json(data: dict, discovered_by_query: str) -> list[dict]:
             continue
         seen_urls.add(url)
         title = result.get("title") or ""
-        snippet = result.get("description") or ""
+        snippet = result.get("snippet") or ""
         source = source_from_url(url)
         items.append(
             {
@@ -218,20 +218,20 @@ def parse_brave_json(data: dict, discovered_by_query: str) -> list[dict]:
     return items
 
 
-async def _fetch_brave(query: str) -> list[dict] | None:
-    """Query the Brave Search API. Returns None on any failure so callers can fall back to DDG."""
-    data = await get_json(
-        BRAVE_WEB_SEARCH_URL,
+async def _fetch_serper(query: str) -> list[dict] | None:
+    """Query the Serper (google.serper.dev) API. Returns None on any failure so callers can fall back to DDG."""
+    data = await post_json(
+        SERPER_SEARCH_URL,
         headers={
-            "Accept": "application/json",
-            "X-Subscription-Token": config.BRAVE_SEARCH_API_KEY,
+            "Content-Type": "application/json",
+            "X-API-KEY": config.SERPER_API_KEY,
         },
-        params={"q": query, "count": 20},
-        source="brave_search",
+        json_body={"q": query, "num": 20},
+        source="serper_search",
     )
     if not isinstance(data, dict):
         return None
-    return parse_brave_json(data, query)
+    return parse_serper_json(data, query)
 
 
 async def _fetch_serp(query: str) -> Response | None:
@@ -302,10 +302,10 @@ async def discover(
         logger.info("Web signal search %s: %r", site, query)
 
         items: list[dict] | None = None
-        if config.BRAVE_SEARCH_API_KEY:
-            items = await _fetch_brave(query)
+        if config.SERPER_API_KEY:
+            items = await _fetch_serper(query)
             if items is None:
-                logger.warning("Brave search failed for %r; falling back to DDG scrape", query)
+                logger.warning("Serper search failed for %r; falling back to DDG scrape", query)
 
         if items is None:
             try:
