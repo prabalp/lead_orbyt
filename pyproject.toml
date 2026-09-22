@@ -29,6 +29,7 @@ dev = [
 [project.scripts]
 leadorbyt = "leadorbyt.server:main"
 leadorbyt-admin = "leadorbyt.admin:main"
+leadorbyt-cleanup = "leadorbyt.cleanup:main"
 
 [tool.setuptools.packages.find]
 include = ["leadorbyt*"]

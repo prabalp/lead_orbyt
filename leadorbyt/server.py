@@ -65,7 +65,10 @@ def _discovery_result(path: str) -> dict:
             "posting about this (LinkedIn, Reddit, X, Facebook), call "
             "find_web_signals next. Do not assume they want both. Then ask "
             "whether they want website enrichment of the Maps list. Do not call "
-            "enrich_lead_list unless the user explicitly confirms."
+            "enrich_lead_list unless the user explicitly confirms. Mention that "
+            "this CSV is auto-deleted after a retention window (see "
+            "read_result_csv's docstring) and offer to help them download it now "
+            "if they want to keep it."
         ),
     }
 
@@ -241,7 +244,10 @@ async def find_web_signals(
             "Call read_result_csv(result_path=...) to retrieve the rows, then show "
             "these web/social posts. If the user also wants Google Maps businesses, "
             "call find_leads_maps next. If they want named people at companies, "
-            "call find_people_leads. Do not chain extra sources unless asked."
+            "call find_people_leads. Do not chain extra sources unless asked. "
+            "Mention that this CSV is auto-deleted after a retention window (see "
+            "read_result_csv's docstring) and offer to help them download it now "
+            "if they want to keep it."
         ),
     }
 
@@ -355,6 +361,15 @@ async def read_result_csv(result_path: str, offset: int = 0, limit: int = 100) -
     download URL -- it does NOT put the rows in front of you. Call this with
     that exact `result_path` (copied verbatim from that tool's response) to
     retrieve and page through the actual data.
+
+    Result CSVs are NOT kept forever -- a cron job deletes them after
+    LEADORBYT_RESULT_RETENTION_DAYS (default 7 days; see
+    leadorbyt/cleanup.py) to keep server storage from growing unbounded. If
+    the user wants to keep a result past that window, tell them to download
+    it to their own machine now, e.g.:
+    `curl -H "Authorization: Bearer <their API key>" "<result_path>" -o leads.csv`
+    -- the URL alone (opened in a plain browser) will not work, since the
+    download endpoint requires that same Bearer key used for every MCP call.
 
     :param result_path: The exact `result_path` (or `source_path`) string
         returned by another tool, for this same authenticated tenant.

@@ -44,6 +44,10 @@ CACHE_TTL_DAYS = float(os.environ.get("LEADORBYT_CACHE_TTL_DAYS", "7"))
 
 # --- Output ---
 OUTPUT_DIR = Path(os.environ.get("LEADORBYT_OUTPUT_DIR", str(Path.cwd() / "leads_output")))
+# Result CSVs under OUTPUT_DIR/<user_id>/ older than this are deleted by
+# `python -m leadorbyt.cleanup` (run on a schedule -- see docs/cleanup.md).
+# Not enforced by the server process itself; an external cron owns timing.
+RESULT_RETENTION_DAYS = float(os.environ.get("LEADORBYT_RESULT_RETENTION_DAYS", "7"))
 
 # --- Pre-enrichment qualification gate (see qualify.py) ---
 # Almost every paid source in sources/registry.py is keyed on domain (Apollo,
