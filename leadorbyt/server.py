@@ -519,7 +519,13 @@ async def find_people_leads(
     prior call is remembered and not re-qualified or re-revealed for free.
 
     :param job_titles: Target job titles, e.g. ["CISO", "IT Director", "VP Engineering"].
-    :param location: Company headquarters location, e.g. "Austin, TX".
+    :param location: Company headquarters location, e.g. "Austin, TX" or "Florida".
+        A US state abbreviation is expanded automatically ("TX" ->
+        "Texas") and a bare state name gets ", United States" appended
+        automatically ("Florida" -> "Florida, United States") -- both are
+        required for BetterContact's location filter to match anything; a
+        bare city name with no state (e.g. just "Austin") is not
+        auto-corrected and may still match nothing.
     :param icp: Optional free-text ideal-customer description used to rank/qualify
         people before spending reveal credits (see `qualify_ml.py`). No API key
         involved: qualification is a fully offline confidence gate learned from
@@ -538,10 +544,27 @@ async def find_people_leads(
         location/icp returns *additional* new leads on top of what a prior
         call already surfaced, since seen leads are remembered.
     :param seniorities: Optional seniority filter, e.g. ["director", "vp", "c_suite"].
-    :param headcount_min: Optional minimum employer headcount.
-    :param headcount_max: Optional maximum employer headcount.
-    :param industries: Optional employer industry/keyword filter.
-    :param technologies: Optional employer technology-stack filter (BetterContact only).
+    :param headcount_min: Optional minimum employer headcount. A real filter
+        (confirmed against live BetterContact data). Note the matched
+        headcount is for the specific company/LinkedIn page BetterContact
+        has on file for that lead, which can be a subsidiary or regional
+        office smaller than the parent brand's total headcount -- a company
+        recognized as "Fortune 500" by name can still legitimately match a
+        low headcount_max.
+    :param headcount_max: Optional maximum employer headcount. See headcount_min.
+    :param industries: Optional employer industry filter (BetterContact only).
+        A real exact-match filter, but BetterContact's own documented
+        taxonomy (https://doc.bettercontact.rocks/api-reference/taxonomies#industries)
+        does not reliably match the free-text values in its actual lead
+        data (confirmed live: a real lead's industry came back as "Freight
+        and package transportation", which is not in that taxonomy at all)
+        -- most values, including ones taken straight from BetterContact's
+        own docs, are likely to match zero leads. Omit this filter unless
+        you've confirmed a specific value returns results for your account.
+    :param technologies: Optional employer technology-stack filter (BetterContact
+        only). A real exact-match filter against
+        https://doc.bettercontact.rocks/api-reference/taxonomies#technologies;
+        values are lowercased automatically before sending.
     :return: Download URL for the generated CSV file. Call
         read_result_csv(result_path=...) with it to retrieve the rows.
     """
@@ -636,20 +659,27 @@ async def list_unlabeled_leads(
     yourself and report your verdicts via `submit_lead_verdicts`; a later
     `find_people_leads(..., icp=icp)` call will then gate-decide on them.
 
+    See `find_people_leads` for `location`/`headcount_min`/`headcount_max`/
+    `industries`/`technologies` parameter details (location normalization,
+    and the caveat on `industries`' taxonomy not matching live data).
+
     :return: list of dicts, each with `dedup_key`, `profile_text`, and every
         field the person search discovered for that lead.
     """
     user_id = auth.require_user_id()
-    people = await person_search.search_people(
-        job_titles,
-        location,
-        max_results,
-        seniorities=seniorities,
-        headcount_min=headcount_min,
-        headcount_max=headcount_max,
-        industries=industries,
-        technologies=technologies,
-    )
+    try:
+        people = await person_search.search_people(
+            job_titles,
+            location,
+            max_results,
+            seniorities=seniorities,
+            headcount_min=headcount_min,
+            headcount_max=headcount_max,
+            industries=industries,
+            technologies=technologies,
+        )
+    except Exception as exc:
+        _raise_as_runtime_error(exc)
     for person in people:
         if not person.get("full_name"):
             person["full_name"] = f"{person.get('first_name', '')} {person.get('last_name_obfuscated', '')}".strip()

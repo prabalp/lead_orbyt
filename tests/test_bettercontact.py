@@ -1,6 +1,7 @@
 import pytest
 
 from leadorbyt import config
+from leadorbyt.errors import LeadOrbytError
 from leadorbyt.sources import bettercontact
 
 
@@ -57,7 +58,10 @@ async def test_search_people_disabled_without_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_people_returns_empty_on_poll_timeout(monkeypatch):
+async def test_search_people_raises_on_poll_timeout_instead_of_empty_list(monkeypatch):
+    """A poll that never terminates is a real failure, not '0 leads found' --
+    it must be distinguishable by the caller, not silently swallowed into []."""
+
     async def fake_post_json(url, **kwargs):
         return {"success": True, "request_id": "r1"}
 
@@ -67,8 +71,123 @@ async def test_search_people_returns_empty_on_poll_timeout(monkeypatch):
     monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
     monkeypatch.setattr(bettercontact, "get_json", fake_get_json)
 
-    people = await bettercontact.search_people(["CISO"], "Austin, TX", 10)
-    assert people == []
+    with pytest.raises(LeadOrbytError, match="transport_error"):
+        await bettercontact.search_people(["CISO"], "Austin, TX", 10)
+
+
+@pytest.mark.asyncio
+async def test_search_people_raises_when_submit_response_has_no_response(monkeypatch):
+    async def fake_post_json(url, **kwargs):
+        return None
+
+    monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
+
+    with pytest.raises(LeadOrbytError, match="transport_error"):
+        await bettercontact.search_people(["CISO"], "Austin, TX", 10)
+
+
+@pytest.mark.asyncio
+async def test_search_people_raises_when_api_rejects_the_request(monkeypatch):
+    async def fake_post_json(url, **kwargs):
+        return {"success": False, "message": "invalid filter"}
+
+    monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
+
+    with pytest.raises(LeadOrbytError, match="invalid filter"):
+        await bettercontact.search_people(["CISO"], "Austin, TX", 10)
+
+
+@pytest.mark.asyncio
+async def test_search_people_normalizes_state_abbreviation_in_location(monkeypatch):
+    captured = {}
+
+    async def fake_post_json(url, **kwargs):
+        captured["location"] = kwargs["json_body"]["filters"]["lead_location"]["include"]
+        return {"success": True, "request_id": "r1"}
+
+    async def fake_get_json(url, **kwargs):
+        return {"status": "terminated", "leads": []}
+
+    monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
+    monkeypatch.setattr(bettercontact, "get_json", fake_get_json)
+
+    await bettercontact.search_people(["CISO"], "San Francisco, CA", 10)
+
+    assert captured["location"] == ["San Francisco, California"]
+
+
+@pytest.mark.asyncio
+async def test_search_people_backfills_country_onto_bare_state_name(monkeypatch):
+    captured = {}
+
+    async def fake_post_json(url, **kwargs):
+        captured["location"] = kwargs["json_body"]["filters"]["lead_location"]["include"]
+        return {"success": True, "request_id": "r1"}
+
+    async def fake_get_json(url, **kwargs):
+        return {"status": "terminated", "leads": []}
+
+    monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
+    monkeypatch.setattr(bettercontact, "get_json", fake_get_json)
+
+    await bettercontact.search_people(["CISO"], "Florida", 10)
+
+    assert captured["location"] == ["Florida, United States"]
+
+
+@pytest.mark.asyncio
+async def test_search_people_leaves_bare_country_unchanged(monkeypatch):
+    captured = {}
+
+    async def fake_post_json(url, **kwargs):
+        captured["location"] = kwargs["json_body"]["filters"]["lead_location"]["include"]
+        return {"success": True, "request_id": "r1"}
+
+    async def fake_get_json(url, **kwargs):
+        return {"status": "terminated", "leads": []}
+
+    monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
+    monkeypatch.setattr(bettercontact, "get_json", fake_get_json)
+
+    await bettercontact.search_people(["CISO"], "United States", 10)
+
+    assert captured["location"] == ["United States"]
+
+
+@pytest.mark.asyncio
+async def test_search_people_lowercases_technologies(monkeypatch):
+    captured = {}
+
+    async def fake_post_json(url, **kwargs):
+        captured["technologies"] = kwargs["json_body"]["filters"]["company_technologies"]["include"]
+        return {"success": True, "request_id": "r1"}
+
+    async def fake_get_json(url, **kwargs):
+        return {"status": "terminated", "leads": []}
+
+    monkeypatch.setattr(bettercontact, "post_json", fake_post_json)
+    monkeypatch.setattr(bettercontact, "get_json", fake_get_json)
+
+    await bettercontact.search_people(["CISO"], "", 10, technologies=["HubSpot", "Shopify"])
+
+    assert captured["technologies"] == ["hubspot", "shopify"]
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("San Francisco, CA", "San Francisco, California"),
+        ("Miami, FL", "Miami, Florida"),
+        ("Florida", "Florida, United States"),
+        ("California", "California, United States"),
+        ("Austin, TX", "Austin, Texas"),
+        ("United States", "United States"),
+        ("", ""),
+        ("  Miami,  FL  ", "Miami, Florida"),
+    ],
+)
+def test_normalize_location(raw, expected):
+    assert bettercontact._normalize_location(raw) == expected
 
 
 @pytest.mark.asyncio
