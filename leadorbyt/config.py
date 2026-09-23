@@ -89,6 +89,18 @@ QUALIFY_GATE_MAX_STD = float(os.environ.get("LEADORBYT_QUALIFY_GATE_MAX_STD", "0
 QUERY_EXPANSION_MAX_ROUNDS = int(os.environ.get("LEADORBYT_QUERY_EXPANSION_MAX_ROUNDS", "2"))
 QUERY_EXPANSION_TOKENS_PER_ROUND = int(os.environ.get("LEADORBYT_QUERY_EXPANSION_TOKENS_PER_ROUND", "3"))
 
+# --- Auto-volume expansion for find_people_leads (see people_jobs.py) ---
+# BetterContact's lead_finder is fully deterministic per filter set (the
+# identical request returns the identical ~100 leads every time -- confirmed
+# live) and caps at ~100 leads per single request regardless of max_results.
+# So once the first round + any goal_new_leads title-expansion rounds still
+# haven't reached max_results, additional rounds auto-vary seniority (then
+# headcount) into slices the caller didn't already constrain, to reach a
+# large max_results (e.g. 1000) without the caller crafting separate calls
+# themselves. Bounds total rounds (across both expansion mechanisms
+# combined) for cost/latency, same purpose as MAX_PAID_LOOKUPS_CEILING.
+PEOPLE_SEARCH_MAX_ROUNDS = int(os.environ.get("LEADORBYT_PEOPLE_SEARCH_MAX_ROUNDS", "10"))
+
 # --- Web/social intent search (see web_signals.py / web_jobs.py) ---
 # find_web_signals searches with site: filters for LinkedIn, Reddit, X, and
 # Facebook, separate from find_leads_maps (Google Maps). Google's /search is

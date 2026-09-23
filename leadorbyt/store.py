@@ -707,6 +707,18 @@ def put_person_contact(person_id: str, data: dict) -> None:
 
 # --- People leads (cross-run dedup/provenance; per-user) --------------------
 
+def get_seen_person_dedup_keys(user_id: str) -> set[str]:
+    """Every dedup_key already surfaced to this user in any prior job --
+    used to pre-seed a fresh job's in-memory seen set, so a completely new
+    call actually excludes people the user has already been shown (per the
+    documented `goal_new_leads` behavior: 'seen leads are remembered'),
+    rather than only tagging them `is_new_lead=False` while still exporting
+    the duplicate row."""
+    with _cursor() as cur:
+        rows = cur.execute("SELECT dedup_key FROM people_leads WHERE user_id = ?", (user_id,)).fetchall()
+    return {row[0] for row in rows}
+
+
 def upsert_person_lead(
     user_id: str,
     dedup_key: str,

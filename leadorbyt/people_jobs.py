@@ -211,16 +211,26 @@ async def _reveal_emails(people: list[dict], job: PersonSearchJob, icp_hash: str
 
 
 async def _search_and_process_round(
-    round_titles: list[str], job: PersonSearchJob, icp_hash: str, seen_keys: set[str]
+    round_titles: list[str],
+    job: PersonSearchJob,
+    icp_hash: str,
+    seen_keys: set[str],
+    extra_filters: dict | None = None,
 ) -> list[dict]:
     """One round: search, dedupe against everything seen so far (this job and
-    prior jobs, via `people_leads`), tag, and qualify. Returns only the
+    prior jobs, via `people_leads` -- `seen_keys` is pre-seeded from it at
+    job start, see `_run_people_search`), tag, and qualify. Returns only the
     newly-seen-in-this-job people from this round (already qualified if
     job.icp is set).
+
+    `extra_filters` overrides/adds to `job.filters` for this round only
+    (job.filters itself is untouched) -- used by the auto-volume-expansion
+    phase in `_run_people_search` to vary seniority/headcount per round.
     """
-    logger.info(f"Searching people {round_titles!r} in '{job.location}' (max {job.max_results})")
-    batch = await person_search.search_people(round_titles, job.location, job.max_results, **job.filters)
-    discovered_by_query = f"{round_titles} | {job.location}"
+    filters = {**job.filters, **extra_filters} if extra_filters else job.filters
+    logger.info(f"Searching people {round_titles!r} in '{job.location}' (max {job.max_results}) filters={filters!r}")
+    batch = await person_search.search_people(round_titles, job.location, job.max_results, **filters)
+    discovered_by_query = f"{round_titles} | {job.location}" + (f" | {extra_filters}" if extra_filters else "")
 
     new_people = []
     for person in batch:
@@ -261,6 +271,44 @@ async def _search_and_process_round(
     return new_people
 
 
+# BetterContact's lead_finder caps at ~100 leads/request AND is fully
+# deterministic per filter set -- the identical request returns the
+# identical ~100 people every time (confirmed live). So reaching a large
+# max_results needs genuinely different filters per round, not more of the
+# same. Seniority is tried first: a garbage value reliably returns 0 (a
+# real, applied filter) and "vp" vs "director" returned zero overlapping
+# people in testing, unlike headcount bands which can straddle real
+# organizations less cleanly. Values are BetterContact's documented
+# lead_seniority taxonomy (confirmed real, unlike company_industry's
+# taxonomy -- see bettercontact.py's module docstring).
+_AUTO_SENIORITY_BANDS = [
+    "vp", "director", "c_suite", "head", "manager",
+    "senior", "mid-level", "founder", "owner", "partner", "entry", "intern",
+]
+_AUTO_HEADCOUNT_BANDS = [
+    (1, 10), (11, 50), (51, 200), (201, 500),
+    (501, 1000), (1001, 5000), (5001, 10000), (10001, None),
+]
+
+
+def _auto_variation_rounds(job_filters: dict) -> list[dict]:
+    """Extra per-round filter overlays to reach max_results once the initial
+    (+ any goal_new_leads title-expansion) rounds aren't enough on their
+    own. Only varies a dimension the caller didn't already explicitly
+    constrain -- an explicit ask (e.g. a specific seniority) is never
+    silently overridden, and if the caller already constrained BOTH
+    dimensions this can vary, it returns [] (nothing left to try
+    automatically; see find_people_leads's docstring for what to do next)."""
+    if not job_filters.get("seniorities"):
+        return [{"seniorities": [s]} for s in _AUTO_SENIORITY_BANDS]
+    if job_filters.get("headcount_min") is None and job_filters.get("headcount_max") is None:
+        return [
+            {"headcount_min": lo, **({"headcount_max": hi} if hi is not None else {})}
+            for lo, hi in _AUTO_HEADCOUNT_BANDS
+        ]
+    return []
+
+
 async def _run_people_search(job: PersonSearchJob) -> None:
     job.status = "running"
     job.stage = "searching"
@@ -268,14 +316,21 @@ async def _run_people_search(job: PersonSearchJob) -> None:
     await asyncio.to_thread(store.update_people_job_progress, job.id, stage=job.stage)
 
     icp_hash = store.icp_hash(job.icp)  # scopes lead_states even with icp="" (empty-ICP context)
-    seen_keys: set[str] = set()
+    # Pre-seeded from every prior job's results for this user (not just this
+    # job's own rounds) -- so a person already surfaced to this tenant is
+    # excluded from a fresh export outright, matching what find_people_leads's
+    # docstring already promises ("seen leads are remembered"), rather than
+    # only being tagged is_new_lead=False while still duplicating the row.
+    seen_keys: set[str] = await asyncio.to_thread(store.get_seen_person_dedup_keys, job.user_id)
     people: list[dict] = []
     total_new_qualified = 0
     round_titles = list(job.job_titles)
+    rounds_budget = config.PEOPLE_SEARCH_MAX_ROUNDS
     # Expansion only ever runs when a goal was explicitly requested -- with
     # goal_new_leads=None this is exactly one round, identical to pre-expansion behavior.
-    max_rounds = config.QUERY_EXPANSION_MAX_ROUNDS if job.goal_new_leads else 0
+    max_rounds = min(config.QUERY_EXPANSION_MAX_ROUNDS, rounds_budget - 1) if job.goal_new_leads else 0
 
+    round_num = 0
     for round_num in range(max_rounds + 1):
         new_people = await _search_and_process_round(round_titles, job, icp_hash, seen_keys)
         people.extend(new_people)
@@ -297,7 +352,21 @@ async def _run_people_search(job: PersonSearchJob) -> None:
         round_titles = round_titles + expansion_titles
         logger.info(f"Job {job.id}: expanding search with {expansion_titles!r} (round {round_num + 1})")
 
-    logger.info(f"Found {len(people)} people for job {job.id}")
+    # Auto-volume expansion: if max_results still isn't reached, keep going
+    # with rounds that vary seniority (then headcount) instead of job
+    # titles -- see _auto_variation_rounds. This is what lets a caller just
+    # ask for max_results=1000 without crafting separate calls themselves.
+    rounds_used = round_num + 1
+    for extra_filters in _auto_variation_rounds(job.filters):
+        if len(people) >= job.max_results or rounds_used >= rounds_budget:
+            break
+        rounds_used += 1
+        new_people = await _search_and_process_round(job.job_titles, job, icp_hash, seen_keys, extra_filters)
+        people.extend(new_people)
+        job.people_found = len(people)
+        await asyncio.to_thread(store.update_people_job_progress, job.id, people_found=job.people_found)
+
+    logger.info(f"Found {len(people)} people for job {job.id} in {rounds_used} round(s)")
 
     ranked = people
     if job.icp:

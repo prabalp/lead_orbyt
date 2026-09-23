@@ -34,6 +34,12 @@ def _job(goal_new_leads=None, icp="") -> PersonSearchJob:
         max_paid_lookups=0,
         icp=icp,
         goal_new_leads=goal_new_leads,
+        # These tests are about the goal_new_leads/title-expansion mechanism
+        # specifically -- constrain both auto-variation dimensions so the
+        # separate max_results-driven auto-volume-expansion phase (see
+        # test_people_jobs_auto_volume.py) has nothing left to vary and
+        # stays a no-op here, keeping these round counts unaffected by it.
+        filters={"seniorities": ["vp"], "headcount_min": 1, "headcount_max": 999_999_999},
     )
 
 

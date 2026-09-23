@@ -549,7 +549,20 @@ async def find_people_leads(
         enough verdicts exist, a lead comes back `qualified=True`/
         `source=agent_pending` (never dropped) and reveals happen in
         search-result order up to `max_paid_lookups`.
-    :param max_results: Maximum number of people to discover per search round (free).
+    :param max_results: Target total number of people (free -- this is separate
+        from max_paid_lookups). A single BetterContact search request caps at
+        ~100 leads AND is fully deterministic per filter set (the identical
+        request returns the identical ~100 people every time -- confirmed
+        live), so asking for more than ~100 automatically runs additional
+        search rounds that vary seniority (then headcount, whichever you
+        haven't already constrained yourself) into slices you haven't tried
+        yet, up to `config.PEOPLE_SEARCH_MAX_ROUNDS` rounds total (default
+        10, so ~1000 leads is the practical ceiling in one call -- each round
+        is a real API call + poll wait, so a large max_results adds real
+        latency, roughly a few seconds per round). If you've already
+        constrained BOTH seniorities and headcount yourself, there's nothing
+        left to auto-vary and max_results beyond ~100 has no further effect
+        -- vary `location` or `job_titles` across separate calls instead.
     :param max_paid_lookups: Maximum email-reveal attempts; default 0 (no enrichment/spend).
     :param goal_new_leads: If set, keep expanding the search (trying additional
         job-title terms learned from prior qualified/rejected leads for this
