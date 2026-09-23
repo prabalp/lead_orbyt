@@ -549,6 +549,18 @@ async def find_people_leads(
         enough verdicts exist, a lead comes back `qualified=True`/
         `source=agent_pending` (never dropped) and reveals happen in
         search-result order up to `max_paid_lookups`.
+        RECOMMENDED WORKFLOW for a new ICP, before pulling a large
+        max_results: call `get_icp_gate_status(icp)` first. If not
+        `gate_ready` (or not `balanced`), call `list_unlabeled_leads(icp=...,
+        max_results=30)`, judge each returned profile yourself against the
+        ICP (you already have the reasoning for this -- that's the whole
+        point of not spending a separate AI API call on it), and
+        `submit_lead_verdicts` with your verdicts -- aim for a genuinely
+        mixed set of clearly-good and clearly-bad examples, not just enough
+        to clear the minimum count. Only then call `find_people_leads`
+        with this exact same ICP text and your real target max_results.
+        Skipping this just gets you max_results leads all tagged
+        `agent_pending` -- not wrong, but not scored either.
     :param max_results: Target total number of people (free -- this is separate
         from max_paid_lookups). A single BetterContact search request caps at
         ~100 leads AND is fully deterministic per filter set (the identical
@@ -666,6 +678,49 @@ async def get_people_search_status(job_id: str) -> dict:
 
 
 @server.tool()
+async def get_icp_gate_status(icp: str) -> dict:
+    """Check whether the offline qualification gate for this exact ICP text
+    has enough agent-supplied verdicts to actually score leads yet -- call
+    this BEFORE running a large find_people_leads(icp=..., max_results=...)
+    pull, so you don't burn it on results that all come back
+    `qualified=True, source="agent_pending"` (a flat placeholder, not a
+    real score -- see qualify_ml.py).
+
+    :param icp: The exact ICP text you intend to use. Matched by exact text
+        hash (`store.icp_hash`) -- rewording it even slightly starts a
+        fresh, unlabeled gate with none of this ICP's prior verdicts.
+    :return: dict with `labels_recorded`, `positive_labels`,
+        `negative_labels`, `min_labels_required` (config.QUALIFY_MIN_LABELS),
+        `gate_ready` (labels_recorded >= min_labels_required), and
+        `balanced` (at least one positive AND one negative label). A
+        lopsided all-one-class sample can technically clear
+        `min_labels_required` while still being a bad gate -- with only
+        positive examples (or only negative), the model has no contrast to
+        learn a real boundary from (the only counterweight is one synthetic
+        anchor: the ICP text's own embedding, labeled positive -- see
+        qualify_ml.py's `_fit_gate`). Don't treat `gate_ready` alone as
+        "good to go" -- check `balanced` too, and prefer well past the bare
+        minimum (~20-30 verdicts spanning clearly-good and clearly-bad
+        examples) over exactly `min_labels_required`, for a boundary that
+        actually generalizes to the next 1000 leads rather than overfitting
+        a handful of points.
+    """
+    user_id = auth.require_user_id()
+    icp_hash_value = store.icp_hash(icp)
+    labels = await asyncio.to_thread(store.get_qualification_labels, user_id, icp_hash_value)
+    positive = sum(1 for _, label in labels if label == 1.0)
+    negative = len(labels) - positive
+    return {
+        "labels_recorded": len(labels),
+        "positive_labels": positive,
+        "negative_labels": negative,
+        "min_labels_required": config.QUALIFY_MIN_LABELS,
+        "gate_ready": len(labels) >= config.QUALIFY_MIN_LABELS,
+        "balanced": positive > 0 and negative > 0,
+    }
+
+
+@server.tool()
 async def list_unlabeled_leads(
     job_titles: list[str],
     location: str,
@@ -686,6 +741,14 @@ async def list_unlabeled_leads(
     (cold-start, or genuinely ambiguous). Judge each one against `icp`
     yourself and report your verdicts via `submit_lead_verdicts`; a later
     `find_people_leads(..., icp=icp)` call will then gate-decide on them.
+
+    For a brand-new ICP (check with `get_icp_gate_status` first), call this
+    with `max_results` around 30 -- enough to plausibly get both clearly-fit
+    and clearly-unfit examples to judge, not just the bare minimum the gate
+    needs to turn on. A cold gate returns everything here (nothing to
+    decide on yet), so the first call's judging work is unavoidable; it's
+    what makes every later search on this ICP actually scored instead of
+    all `agent_pending`.
 
     See `find_people_leads` for `location`/`headcount_min`/`headcount_max`/
     `industries`/`technologies` parameter details (location normalization,
@@ -911,6 +974,13 @@ async def submit_lead_verdicts(icp: str, verdicts: list[dict]) -> dict:
 
     Writes each verdict as a training label for `icp`'s confidence gate,
     exactly as if leadorbyt's own LLM had answered it.
+
+    Submit BOTH qualified=True and qualified=False verdicts, not just the
+    good ones -- an all-one-class batch technically satisfies
+    config.QUALIFY_MIN_LABELS but gives the gate almost nothing to draw a
+    real boundary from (check `get_icp_gate_status`'s `balanced` field
+    after submitting). Rejected examples are exactly as valuable as
+    accepted ones here.
 
     :param icp: The same ICP text used in `list_unlabeled_leads`.
     :param verdicts: list of `{"profile_text": str, "qualified": bool, "reason": str,
