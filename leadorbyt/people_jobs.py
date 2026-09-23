@@ -356,12 +356,22 @@ async def _run_people_search(job: PersonSearchJob) -> None:
     # with rounds that vary seniority (then headcount) instead of job
     # titles -- see _auto_variation_rounds. This is what lets a caller just
     # ask for max_results=1000 without crafting separate calls themselves.
+    #
+    # Stop after 2 consecutive rounds with zero NEW people (e.g. a narrow
+    # company_domains search already exhausted by round 1 -- every further
+    # band just re-finds the same already-seen people) instead of always
+    # burning the full rounds_budget regardless of whether it's finding
+    # anything: confirmed live during testing that a job which can't grow
+    # past its first few rounds otherwise wastes every remaining round on
+    # 0-new-people searches, each a real API call + poll wait.
     rounds_used = round_num + 1
+    consecutive_empty = 0
     for extra_filters in _auto_variation_rounds(job.filters):
-        if len(people) >= job.max_results or rounds_used >= rounds_budget:
+        if len(people) >= job.max_results or rounds_used >= rounds_budget or consecutive_empty >= 2:
             break
         rounds_used += 1
         new_people = await _search_and_process_round(job.job_titles, job, icp_hash, seen_keys, extra_filters)
+        consecutive_empty = 0 if new_people else consecutive_empty + 1
         people.extend(new_people)
         job.people_found = len(people)
         await asyncio.to_thread(store.update_people_job_progress, job.id, people_found=job.people_found)

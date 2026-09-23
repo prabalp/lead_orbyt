@@ -44,6 +44,20 @@ async def test_apollo_maps_industries_to_keywords(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_apollo_maps_company_domains(monkeypatch):
+    captured = {}
+
+    async def fake_post_json(url, **kwargs):
+        captured.update(kwargs["json_body"])
+        return {"people": [], "pagination": {"total_entries": 0}}
+
+    monkeypatch.setattr(apollo_people, "post_json", fake_post_json)
+    await apollo_people.search_people(["CISO"], "Austin, TX", 10, company_domains=["fedex.com", "acme.org"])
+
+    assert captured["q_organization_domains_list"] == ["fedex.com", "acme.org"]
+
+
+@pytest.mark.asyncio
 async def test_apollo_omits_filters_when_not_given(monkeypatch):
     captured = {}
 
@@ -57,6 +71,7 @@ async def test_apollo_omits_filters_when_not_given(monkeypatch):
     assert "person_seniorities" not in captured
     assert "organization_num_employees_ranges" not in captured
     assert "q_keywords" not in captured
+    assert "q_organization_domains_list" not in captured
 
 
 @pytest.mark.asyncio
@@ -82,6 +97,7 @@ async def test_bettercontact_maps_all_new_filters(monkeypatch):
         headcount_max=500,
         industries=["fintech"],
         technologies=["salesforce"],
+        company_domains=["fedex.com", "acme.org"],
     )
 
     filters = captured["filters"]
@@ -90,6 +106,7 @@ async def test_bettercontact_maps_all_new_filters(monkeypatch):
     assert filters["company_headcount_max"] == 500
     assert filters["company_industry"] == {"include": ["fintech"]}
     assert filters["company_technologies"] == {"include": ["salesforce"]}
+    assert filters["company"] == {"include": ["fedex.com", "acme.org"]}
 
 
 @pytest.mark.asyncio
@@ -109,5 +126,12 @@ async def test_bettercontact_omits_filters_when_not_given(monkeypatch):
     await bettercontact.search_people(["CISO"], "Austin, TX", 10)
 
     filters = captured["filters"]
-    for key in ("lead_seniority", "company_headcount_min", "company_headcount_max", "company_industry", "company_technologies"):
+    for key in (
+        "lead_seniority",
+        "company_headcount_min",
+        "company_headcount_max",
+        "company_industry",
+        "company_technologies",
+        "company",
+    ):
         assert key not in filters

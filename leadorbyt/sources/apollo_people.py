@@ -41,6 +41,7 @@ async def search_people(
     headcount_max: int | None = None,
     industries: list[str] | None = None,
     technologies: list[str] | None = None,
+    company_domains: list[str] | None = None,
 ) -> list[dict]:
     """Free people search by job title + company HQ location. Never returns contact info.
 
@@ -50,7 +51,9 @@ async def search_people(
     param -- all verified against Apollo's live API reference. `technologies`
     has no Apollo equivalent (BetterContact-only filter) and is accepted here
     only so `person_search.py` can pass the same kwargs to either provider
-    uniformly; it's silently ignored.
+    uniformly; it's silently ignored. `company_domains` maps to
+    `q_organization_domains_list[]` -- confirmed against Apollo's docs;
+    there is no organization NAME filter on this API either, only domain/ID.
     """
     if not enabled() or not job_titles:
         return []
@@ -71,6 +74,8 @@ async def search_people(
         body["organization_num_employees_ranges"] = [f"{lo},{hi}"]
     if industries:
         body["q_keywords"] = " ".join(industries)
+    if company_domains:
+        body["q_organization_domains_list"] = company_domains
 
     while len(people) < max_results:
         data = await post_json(

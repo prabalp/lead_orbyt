@@ -123,6 +123,29 @@ async def test_auto_volume_expansion_noop_when_max_results_already_met(isolated_
 
 
 @pytest.mark.asyncio
+async def test_auto_volume_expansion_stops_after_two_consecutive_empty_rounds(isolated_db, monkeypatch):
+    """A narrow search (e.g. company_domains already exhausted) shouldn't
+    burn the whole round budget on rounds finding nothing new."""
+    monkeypatch.setattr(config, "PEOPLE_SEARCH_MAX_ROUNDS", 10)
+    calls = {"n": 0}
+
+    async def fake_search(job_titles, location, max_results, **filters):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [_fake_person(f"round1-person{i}") for i in range(3)]
+        return []  # every round after that finds nothing new
+
+    monkeypatch.setattr(person_search, "search_people", fake_search)
+
+    job = _job(max_results=1000)
+    await _run_people_search(job)
+
+    # round 1 (3 people) + 2 more empty rounds before giving up = 3 calls
+    assert calls["n"] == 3
+    assert job.people_found == 3
+
+
+@pytest.mark.asyncio
 async def test_cross_call_dedup_excludes_previously_seen_people(isolated_db, monkeypatch):
     """A person already surfaced to this user in an earlier job must be
     excluded from a completely separate later job's export outright, not

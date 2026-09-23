@@ -27,7 +27,21 @@ import uvicorn
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import auth, config, files, jobs, people_jobs, qualify_ml, signal_jobs, signup, social_connect, store, web_jobs
+from . import (
+    auth,
+    config,
+    files,
+    jobs,
+    org_jobs,
+    people_jobs,
+    qualify_ml,
+    signal_jobs,
+    signup,
+    social_connect,
+    store,
+    web_jobs,
+    web_search_jobs,
+)
 from .enrich import enrich_website
 from .errors import ErrorType, LeadOrbytError
 from .merge import _normalize
@@ -290,6 +304,173 @@ async def get_web_signal_search_status(job_id: str) -> dict:
 
 
 @server.tool()
+async def web_search(query: str, max_results: int = 10) -> dict:
+    """General-purpose web search -- a free-text query in, ranked results out,
+    the same way an assistant's own built-in web search works. NOT restricted
+    to the LinkedIn/Reddit/X/Facebook domains find_web_signals searches, and
+    not tied to any discovery pipeline -- use this for open-ended research
+    (an organization's leadership page, a conference site, an industry
+    directory, news coverage, anything indexed) instead of reaching for a
+    web-search tool outside leadorbyt.
+
+    Backend: Serper (google.serper.dev, real Google results) when
+    `SERPER_API_KEY` is configured, else a DuckDuckGo HTML scrape --
+    identical two-tier setup to find_web_signals, and the same known
+    caveat: the DDG fallback is unreliable against datacenter IPs (see
+    web_signals.py's module docstring for why; this is the exact
+    dependency that caused an earlier find_web_signals outage).
+
+    :param query: Free-text search query.
+    :param max_results: Maximum results to return (capped at 10 by Serper's
+        free tier when that's the active backend).
+    :return: `status`, `result_path` (download URL for a CSV of
+        title/url/snippet rows -- call read_result_csv(result_path=...) to
+        retrieve them), and `result_count`.
+    """
+    user_id = auth.require_user_id()
+    try:
+        job_id = await web_search_jobs.submit(user_id, query, max_results)
+        result = await web_search_jobs.wait_for(job_id)
+    except Exception as exc:
+        _raise_as_runtime_error(exc)
+    if result["error"]:
+        raise RuntimeError(f"error: {result.get('error_type') or ErrorType.INTERNAL.value}: {result['error']}")
+    path = result["result_path"]
+    return {
+        "status": "web_search_complete",
+        "result_path": files.download_url(path),
+        "result_count": _count_csv_rows(path) if path else 0,
+    }
+
+
+@server.tool()
+async def submit_web_search(query: str, max_results: int = 10) -> str:
+    """Enqueue a general-purpose web search. Poll with `get_web_search_status`.
+
+    Use this instead of `web_search` when running many searches a day.
+
+    :return: A job id to pass to `get_web_search_status`.
+    """
+    user_id = auth.require_user_id()
+    return await web_search_jobs.submit(user_id, query, max_results)
+
+
+@server.tool()
+async def get_web_search_status(job_id: str) -> dict:
+    """Check the status of a job from `submit_web_search`.
+
+    :param job_id: The job id returned by `submit_web_search`.
+    :return: dict with `status`, `result_path`, `error`, `error_type`, `stage`,
+        `results_found`. Once `status` is "done", call
+        `read_result_csv(result_path=...)` to retrieve the actual rows.
+    """
+    user_id = auth.require_user_id()
+    result = web_search_jobs.status(job_id, user_id)
+    if result is None:
+        return {
+            "status": "unknown",
+            "result_path": None,
+            "error": "no such job id",
+            "error_type": ErrorType.NOT_FOUND.value,
+        }
+    if result.get("result_path"):
+        result["result_path"] = files.download_url(result["result_path"])
+    return result
+
+
+@server.tool()
+async def find_organizations(category: str, location: str = "", max_results: int = 20, icp: str = "") -> dict:
+    """Discover organizations of a category -- e.g. "national associations
+    serving sales leaders", "regional homebuilder trade associations" --
+    not people (find_people_leads) and not local physical businesses
+    (find_leads_maps, which uses Google Maps and doesn't work for this: a
+    nationwide category search on Maps mostly returns irrelevant or
+    non-US results, since Maps is built for local businesses).
+
+    Runs several directory/listing-style web_search queries for the
+    category and treats each search result as a candidate organization
+    (title -> name, URL's domain -> domain, snippet -> description). This
+    is a best-effort pass over search-engine snippets, not a verified
+    directory -- see org_search.py's module docstring for exactly what it
+    does and doesn't do (it doesn't crawl into directory pages to extract
+    what THEY list). Read-only/discovery-only, like find_leads_maps -- no
+    paid lookups.
+
+    The natural next step: feed this CSV's `domain` column into
+    find_people_leads(company_domains=[...], job_titles=[...]) to get
+    named people at exactly these organizations.
+
+    :param category: The kind of organization to find, e.g. "sales
+        leadership trade association" or "regional homebuilder association".
+    :param location: Optional place to narrow the search, e.g. "Texas" or
+        "United States". Leave blank for a nationwide/unrestricted search.
+    :param max_results: Maximum organizations to return.
+    :param icp: Optional ICP text for offline qualification (see
+        qualify_ml.py / get_icp_gate_status) -- same mechanism as
+        find_people_leads, same cold-start caveat.
+    :return: `status`, `result_path` (download URL -- call
+        read_result_csv(result_path=...) to retrieve the rows), and
+        `organization_count`.
+    """
+    user_id = auth.require_user_id()
+    try:
+        job_id = await org_jobs.submit(user_id, category, location, max_results, icp)
+        result = await org_jobs.wait_for(job_id)
+    except Exception as exc:
+        _raise_as_runtime_error(exc)
+    if result["error"]:
+        raise RuntimeError(f"error: {result.get('error_type') or ErrorType.INTERNAL.value}: {result['error']}")
+    path = result["result_path"]
+    return {
+        "status": "organization_search_complete",
+        "result_path": files.download_url(path),
+        "organization_count": _count_csv_rows(path) if path else 0,
+        "next_action": (
+            "Call read_result_csv(result_path=...) to retrieve the rows, then show "
+            "these organizations. If the user wants named people at them, call "
+            "find_people_leads(company_domains=[...the domain column...], "
+            "job_titles=[...]) next."
+        ),
+    }
+
+
+@server.tool()
+async def submit_organization_search(category: str, location: str = "", max_results: int = 20, icp: str = "") -> str:
+    """Enqueue an organization-category search. Poll with `get_organization_search_status`.
+
+    Use this instead of `find_organizations` when running many searches a day.
+    See `find_organizations` for parameter details.
+
+    :return: A job id to pass to `get_organization_search_status`.
+    """
+    user_id = auth.require_user_id()
+    return await org_jobs.submit(user_id, category, location, max_results, icp)
+
+
+@server.tool()
+async def get_organization_search_status(job_id: str) -> dict:
+    """Check the status of a job from `submit_organization_search`.
+
+    :param job_id: The job id returned by `submit_organization_search`.
+    :return: dict with `status`, `result_path`, `error`, `error_type`, `stage`,
+        `organizations_found`. Once `status` is "done", call
+        `read_result_csv(result_path=...)` to retrieve the actual rows.
+    """
+    user_id = auth.require_user_id()
+    result = org_jobs.status(job_id, user_id)
+    if result is None:
+        return {
+            "status": "unknown",
+            "result_path": None,
+            "error": "no such job id",
+            "error_type": ErrorType.NOT_FOUND.value,
+        }
+    if result.get("result_path"):
+        result["result_path"] = files.download_url(result["result_path"])
+    return result
+
+
+@server.tool()
 async def enrich_url(url: str) -> dict:
     """Run enrichment on a single business website URL.
 
@@ -479,6 +660,7 @@ def _person_filters(
     headcount_max: int | None,
     industries: list[str] | None,
     technologies: list[str] | None,
+    company_domains: list[str] | None,
 ) -> dict:
     return {
         "seniorities": seniorities,
@@ -486,6 +668,7 @@ def _person_filters(
         "headcount_max": headcount_max,
         "industries": industries,
         "technologies": technologies,
+        "company_domains": company_domains,
     }
 
 
@@ -502,6 +685,7 @@ async def find_people_leads(
     headcount_max: int | None = None,
     industries: list[str] | None = None,
     technologies: list[str] | None = None,
+    company_domains: list[str] | None = None,
 ) -> str:
     """Find named decision-makers (people) by job title + company location.
 
@@ -605,12 +789,23 @@ async def find_people_leads(
         only). A real exact-match filter against
         https://doc.bettercontact.rocks/api-reference/taxonomies#technologies;
         values are lowercased automatically before sending.
+    :param company_domains: Optional list of employer website domains
+        (e.g. ["fedex.com", "acme.org"]) to restrict the search to people at
+        exactly those organizations -- confirmed real and OR-matched
+        correctly across multiple domains on both providers. There is no
+        company/organization NAME filter on either provider's API (only
+        domain, or Apollo's internal org ID) -- a raw company name like
+        "Acme Inc" cannot be matched this way. To go from "organizations of
+        category X" to this list, use find_organizations or web_search
+        first to discover the relevant orgs and their domains, then pass
+        those domains here. Combines with job_titles/seniorities/headcount
+        as an additional AND constraint, not a replacement for them.
     :return: Download URL for the generated CSV file. Call
         read_result_csv(result_path=...) with it to retrieve the rows.
     """
     user_id = auth.require_user_id()
     max_paid_lookups = min(max_paid_lookups, config.MAX_PAID_LOOKUPS_CEILING)
-    filters = _person_filters(seniorities, headcount_min, headcount_max, industries, technologies)
+    filters = _person_filters(seniorities, headcount_min, headcount_max, industries, technologies, company_domains)
 
     try:
         job_id = await people_jobs.submit(
@@ -637,6 +832,7 @@ async def submit_people_search(
     headcount_max: int | None = None,
     industries: list[str] | None = None,
     technologies: list[str] | None = None,
+    company_domains: list[str] | None = None,
 ) -> str:
     """Enqueue a person-lead search and return immediately with a job id.
 
@@ -648,7 +844,7 @@ async def submit_people_search(
     """
     user_id = auth.require_user_id()
     max_paid_lookups = min(max_paid_lookups, config.MAX_PAID_LOOKUPS_CEILING)
-    filters = _person_filters(seniorities, headcount_min, headcount_max, industries, technologies)
+    filters = _person_filters(seniorities, headcount_min, headcount_max, industries, technologies, company_domains)
     return await people_jobs.submit(
         user_id, job_titles, location, max_results, max_paid_lookups, icp, goal_new_leads, filters
     )
@@ -731,6 +927,7 @@ async def list_unlabeled_leads(
     headcount_max: int | None = None,
     industries: list[str] | None = None,
     technologies: list[str] | None = None,
+    company_domains: list[str] | None = None,
 ) -> list[dict]:
     """Free preview of which leads still need a qualification verdict for `icp`.
 
@@ -768,6 +965,7 @@ async def list_unlabeled_leads(
             headcount_max=headcount_max,
             industries=industries,
             technologies=technologies,
+            company_domains=company_domains,
         )
     except Exception as exc:
         _raise_as_runtime_error(exc)

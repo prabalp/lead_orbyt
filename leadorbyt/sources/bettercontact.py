@@ -179,6 +179,7 @@ async def search_people(
     headcount_max: int | None = None,
     industries: list[str] | None = None,
     technologies: list[str] | None = None,
+    company_domains: list[str] | None = None,
 ) -> list[dict]:
     """Free search -- always includes full name, LinkedIn URL, and company domain.
 
@@ -191,6 +192,14 @@ async def search_people(
     `technologies` to `company_technologies` (lowercased here; also a real
     filter). `location` is passed through `_normalize_location` first --
     also see the module docstring.
+
+    `company_domains` maps to `company` (confirmed real, and correctly
+    OR-matches across multiple domains in one request -- live-tested with
+    3 domains, got a real mix from 2 of them; the 3rd's 0 results was that
+    domain genuinely having no matching leads, not the filter dropping it).
+    There is no company NAME filter on this API at all (confirmed against
+    BetterContact's own filter reference) -- only domain, which is why this
+    param takes domains, not names.
     """
     if not enabled() or not job_titles:
         return []
@@ -208,6 +217,8 @@ async def search_people(
         filters["company_industry"] = {"include": industries}
     if technologies:
         filters["company_technologies"] = {"include": [t.strip().lower() for t in technologies]}
+    if company_domains:
+        filters["company"] = {"include": company_domains}
 
     request_id = await _submit(filters)
     result = await _poll(request_id)

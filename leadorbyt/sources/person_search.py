@@ -21,7 +21,7 @@ def active_provider_name() -> str | None:
 
 
 async def search_people(job_titles: list[str], location: str, max_results: int, **filters) -> list[dict]:
-    """`**filters` (seniorities/headcount_min/headcount_max/industries/technologies)
+    """`**filters` (seniorities/headcount_min/headcount_max/industries/technologies/company_domains)
     passes through uniformly to whichever provider is active; each provider
     module maps the ones it supports to its own real param name and ignores
     the rest (see apollo_people.py/bettercontact.py for exactly which).
