@@ -1092,6 +1092,18 @@ def get_user_for_key(key_hash: str) -> str | None:
     return row[0] if row else None
 
 
+def set_user_disabled(user_id: str, disabled: bool) -> bool:
+    """Disable (or re-enable) a tenant. `get_user_for_key` already rejects a
+    disabled tenant's keys, so this locks them out of every tool. Returns
+    False if no such user exists."""
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE users SET disabled_at = ? WHERE id = ?",
+            (time.time() if disabled else None, user_id),
+        )
+        return cur.rowcount > 0
+
+
 def list_users() -> list[dict]:
     with _cursor() as cur:
         rows = cur.execute("SELECT id, label, created_at, disabled_at FROM users ORDER BY created_at").fetchall()

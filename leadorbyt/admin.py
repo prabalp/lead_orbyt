@@ -32,6 +32,13 @@ def list_users() -> None:
         print(f"{user['id']}  {user['label']!r}  {status}")
 
 
+def set_disabled(user_id: str, disabled: bool) -> None:
+    if not store.set_user_disabled(user_id, disabled):
+        print(f"no such user: {user_id}", file=sys.stderr)
+        sys.exit(1)
+    print("disabled." if disabled else "enabled.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="leadorbyt-admin")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -44,6 +51,14 @@ def main() -> None:
 
     subparsers.add_parser("list-users", help="List all tenants")
 
+    disable_parser = subparsers.add_parser(
+        "disable-user", help="Block a tenant: all of its API keys stop working"
+    )
+    disable_parser.add_argument("user_id")
+
+    enable_parser = subparsers.add_parser("enable-user", help="Re-enable a disabled tenant")
+    enable_parser.add_argument("user_id")
+
     args = parser.parse_args()
     store.connect()
 
@@ -53,6 +68,10 @@ def main() -> None:
         revoke_key(args.raw_key)
     elif args.command == "list-users":
         list_users()
+    elif args.command == "disable-user":
+        set_disabled(args.user_id, True)
+    elif args.command == "enable-user":
+        set_disabled(args.user_id, False)
     else:
         parser.print_help()
         sys.exit(1)

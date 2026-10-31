@@ -50,7 +50,7 @@ Jobs live in **in-memory asyncio queues**. SQLite is the durable cache, tenant s
 | Process | Entry | Role |
 |---|---|---|
 | Server | `leadorbyt` / `python -m leadorbyt.server` | Long-lived HTTP MCP on `LEADORBYT_HOST`:`LEADORBYT_PORT` (default `0.0.0.0:8000`) |
-| Admin CLI | `leadorbyt-admin` | Create tenants, mint/revoke keys. Never exposed as an MCP tool. |
+| Admin CLI | `leadorbyt-admin` | Create/list/disable/enable tenants, mint/revoke keys. Never exposed as an MCP tool. |
 | Docker | `docker-compose.yml` | Publishes `127.0.0.1:8010` -> container `:8000`, persists `/data` |
 
 Workers start lazily on the first `submit` / `find_*` call (`jobs.start_workers`, `web_jobs.start_workers`, `people_jobs.start_workers`). Browser sessions start on first `browser_pool.checkout()`.
