@@ -69,6 +69,22 @@ Claude Desktop (stdio-only) needs `mcp-remote`:
 }
 ```
 
+### API keys (tokens)
+
+Every key is a plain Bearer token for `{LEADORBYT_PUBLIC_URL}/mcp`. Give each client its own labelled key so you can revoke one without breaking the others. On the server (inside the container: `docker exec -it leadorbyt leadorbyt-admin ...`):
+
+```bash
+leadorbyt-admin list-users
+leadorbyt-admin create-key <user_id> --label orbytlink   # prints the key once
+leadorbyt-admin list-keys <user_id>                      # id, label, created, status
+leadorbyt-admin revoke-key --id <id>                     # or: revoke-key <raw_key>
+leadorbyt-admin disable-user <user_id>                   # blocks every key of that tenant
+```
+
+### Connecting from orbytlink
+
+leadorbyt is a standalone MCP server; orbytlink connects to it like any other MCP app. In orbytlink: add a connection with endpoint `https://lead.orbyt.in/mcp`, authentication **bearer**, token = a key from `create-key ... --label orbytlink`, then run its test. orbytlink's `OUTBOUND_HOSTS` must include `lead.orbyt.in`.
+
 Docker: `docker-compose.yml` maps `127.0.0.1:8010` → `:8000` and stores DB/CSVs in a volume. It does not load `.env` unless you add `env_file`.
 
 ## Tests

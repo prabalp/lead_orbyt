@@ -259,6 +259,7 @@ _ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("search_jobs", "items_total", "INTEGER"),
     ("users", "email_verified_at", "REAL"),
     ("discovery_search_cache", "web_signals_path", "TEXT"),
+    ("api_keys", "label", "TEXT"),
 ]
 
 
@@ -1060,25 +1061,72 @@ def create_user(label: str) -> str:
     return user_id
 
 
-def create_api_key(user_id: str) -> str:
-    """Generate and store a new key for `user_id`; returns the raw key (shown once)."""
+# A key is identified (in `list_api_keys` / `revoke-key --id`) by this many
+# leading hex chars of its SHA-256 hash -- safe to show, since the hash can't
+# be turned back into the key, and unambiguous for any realistic key count.
+KEY_ID_LENGTH = 12
+
+
+def create_api_key(user_id: str, label: str | None = None) -> str:
+    """Generate and store a new key for `user_id`; returns the raw key (shown once).
+
+    `label` is a free-text note of where the key is used (e.g. "orbytlink"),
+    so it can be told apart from the tenant's other keys later."""
     from . import auth  # local import: auth imports store, avoid a cycle at module load
 
     raw_key = auth.generate_key()
     with _cursor() as cur:
         cur.execute(
-            "INSERT INTO api_keys (key_hash, user_id, created_at) VALUES (?, ?, ?)",
-            (auth.hash_key(raw_key), user_id, time.time()),
+            "INSERT INTO api_keys (key_hash, user_id, created_at, label) VALUES (?, ?, ?, ?)",
+            (auth.hash_key(raw_key), user_id, time.time(), label),
         )
     return raw_key
 
 
-def revoke_api_key(key_hash: str) -> None:
+def user_exists(user_id: str) -> bool:
+    with _cursor() as cur:
+        return cur.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is not None
+
+
+def list_api_keys(user_id: str) -> list[dict]:
+    """Every key (active and revoked) for `user_id`, oldest first. Never
+    returns the raw key or full hash -- only a short `id` prefix of the hash."""
+    with _cursor() as cur:
+        rows = cur.execute(
+            "SELECT key_hash, label, created_at, revoked_at FROM api_keys WHERE user_id = ? ORDER BY created_at",
+            (user_id,),
+        ).fetchall()
+    return [
+        {"id": row[0][:KEY_ID_LENGTH], "label": row[1], "created_at": row[2], "revoked_at": row[3]}
+        for row in rows
+    ]
+
+
+def revoke_api_key(key_hash: str) -> bool:
+    """Revoke by full hash. Returns False if no such active key."""
     with _cursor() as cur:
         cur.execute(
-            "UPDATE api_keys SET revoked_at = ? WHERE key_hash = ?",
+            "UPDATE api_keys SET revoked_at = ? WHERE key_hash = ? AND revoked_at IS NULL",
             (time.time(), key_hash),
         )
+        return cur.rowcount > 0
+
+
+def revoke_api_key_by_id(key_id: str) -> bool:
+    """Revoke by the short `id` shown in `list_api_keys`. Refuses (returns
+    False) unless the prefix matches exactly one active key."""
+    key_id = key_id.strip().lower()
+    if len(key_id) < KEY_ID_LENGTH or any(c not in "0123456789abcdef" for c in key_id):
+        return False
+    with _cursor() as cur:
+        rows = cur.execute(
+            "SELECT key_hash FROM api_keys WHERE key_hash LIKE ? AND revoked_at IS NULL",
+            (key_id + "%",),
+        ).fetchall()
+        if len(rows) != 1:
+            return False
+        cur.execute("UPDATE api_keys SET revoked_at = ? WHERE key_hash = ?", (time.time(), rows[0][0]))
+        return True
 
 
 def get_user_for_key(key_hash: str) -> str | None:
