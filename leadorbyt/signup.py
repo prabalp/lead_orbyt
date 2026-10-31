@@ -110,6 +110,13 @@ def claude_desktop_config(api_key: str) -> str:
     )
 
 
+def claude_code_command(api_key: str) -> str:
+    return (
+        f"claude mcp add --transport http --scope user leadorbyt {mcp_url()} "
+        f'--header "Authorization: Bearer {api_key}"'
+    )
+
+
 def issue_access(email: str) -> dict:
     """Create or reuse a tenant for `email` and mint a new API key.
 
@@ -124,7 +131,7 @@ def issue_access(email: str) -> dict:
     except ValueError as exc:
         raise LeadOrbytError(ErrorType.INVALID_INPUT, str(exc)) from exc
     store.mark_email_verified(user_id)
-    api_key = store.create_api_key(user_id)
+    api_key = store.create_api_key(user_id, label="signup")
     logger.info("Issued MCP key for %s (new_tenant=%s)", normalized, created)
     return {
         "email": normalized,
@@ -133,6 +140,7 @@ def issue_access(email: str) -> dict:
         "api_key": api_key,
         "mcp_url": mcp_url(),
         "claude_desktop_config": claude_desktop_config(api_key),
+        "claude_code_command": claude_code_command(api_key),
         "status": "verified",
     }
 
@@ -257,6 +265,12 @@ def _page(
               <button type="button" class="ghost" data-copy="api-key">Copy</button>
             </div>
             <p class="note">Save the key now. It cannot be looked up later.</p>
+            <label for="claude-code">Claude Code</label>
+            <p class="note">Run once in a terminal, then start <code>claude</code>.</p>
+            <div class="copy-row">
+              <input id="claude-code" readonly value="{html.escape(result["claude_code_command"])}">
+              <button type="button" class="ghost" data-copy="claude-code">Copy</button>
+            </div>
             <label for="claude-config">Claude Desktop config</label>
             <p class="note">Paste into <code>claude_desktop_config.json</code>, then restart Claude Desktop.</p>
             <textarea id="claude-config" readonly rows="14">{config_json}</textarea>

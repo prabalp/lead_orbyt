@@ -43,6 +43,9 @@ def test_issue_access_creates_tenant_and_key(isolated_db):
     assert store.get_user_for_key(auth.hash_key(result["api_key"])) == result["user_id"]
     assert result["mcp_url"].endswith("/mcp")
     assert result["api_key"] in result["claude_desktop_config"]
+    assert result["claude_code_command"].startswith("claude mcp add --transport http")
+    assert result["api_key"] in result["claude_code_command"]
+    assert [k["label"] for k in store.list_api_keys(result["user_id"])] == ["signup"]
     user = store.get_user_by_email("ada@example.com")
     assert user["email_verified_at"]
 
